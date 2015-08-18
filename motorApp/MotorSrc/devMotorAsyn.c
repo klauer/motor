@@ -125,6 +125,7 @@ typedef enum motorCommand {
     motorSetClosedLoop,
     motorStatus,
     motorUpdateStatus,
+    motorDeferMoves,
     lastMotorCommand
 } motorCommand;
 #define NUM_MOTOR_COMMANDS lastMotorCommand
