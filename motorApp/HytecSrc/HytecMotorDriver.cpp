@@ -828,12 +828,12 @@ asynStatus HytecMotorAxis::moveVelocity(double min_velocity, double max_velocity
    	if (min_velocity != 0) 
    	{
        	/* Set start speed register, min_velocity is steps/s */
-       	SET_REG(this->chanbase, REG_STARTSTOPSPD, (int)floor(min_velocity));
+       	SET_REG(this->chanbase, REG_STARTSTOPSPD, abs((int)floor(min_velocity)));
    	}
    	if (max_velocity != 0) 
    	{
        	/* Set high speed register, velocity is steps/s */
-       	SET_REG(this->chanbase, REG_HIGHSPD, (int)floor(max_velocity));
+       	SET_REG(this->chanbase, REG_HIGHSPD, abs((int)floor(max_velocity)));
    	}
    	if (acceleration != 0) 
    	{
