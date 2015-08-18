@@ -39,6 +39,12 @@ asynStatus omsBaseAxis::move(double position, int relative, double min_velocity,
     epicsInt32 minvelo, velo, acc, rela, pos;
     char *relabs[2] = {(char *) "MA", (char *) "MR"};
     char buff[100];
+    int closedLoop;
+    
+    pC_->getIntegerParam(this->axisNo_, pC_->motorStatusPowerOn_, &closedLoop);
+    if(isStepper() == 0 && closedLoop == 0){
+        setClosedLoop(1);
+    }
 
     if (relative)
         rela = 1;
@@ -146,6 +152,12 @@ asynStatus omsBaseAxis::moveVelocity(double minVelocity, double maxVelocity, dou
 
     char buff[100];
     epicsInt32 velo, acc;
+    int closedLoop;
+    
+    pC_->getIntegerParam(this->axisNo_, pC_->motorStatusPowerOn_, &closedLoop);
+    if(isStepper() == 0 && closedLoop == 0){
+        setClosedLoop(1);
+    }
 
     acc = (epicsInt32) acceleration;
     if (acc < 1) acc = 1;
@@ -202,6 +214,33 @@ asynStatus omsBaseAxis::setPosition(double position)
     status = pC_->sendOnlyLock(buff);
 
   return status;
+}
+
+/** Set the closed loop status of the motor.
+ * \param[in] value.  Enables/disables a servo motor.  Enables/disables position correction for stepper.
+ */
+asynStatus omsBaseAxis::setClosedLoop(bool closedLoop)
+{
+    static const char *functionName = "setClosedLoop";
+    asynStatus status = asynError;
+    char buff[20];
+    if (closedLoop) {
+            asynPrint(pasynUser_, ASYN_TRACE_FLOW, "%s:%s:%s axis %d closed loop enable\n",
+                  driverName, functionName, pC_->portName, axisNo_);
+            if (pC_->firmwareMin(1,30,0))
+                sprintf(buff,"A%1c CL1", axisChar);
+            else
+                sprintf(buff,"A%1c HN", axisChar);
+        } else {
+            asynPrint(pasynUser_, ASYN_TRACE_FLOW, "%s:%s:%s SetInteger axis %d closed loop disable\n",
+                  driverName, functionName, pC_->portName, axisNo_);
+            if (pC_->firmwareMin(1,30,0))
+                sprintf(buff,"A%1c CL0", axisChar);
+            else
+                sprintf(buff,"A%1c HF", axisChar);
+        }
+    status = pC_->sendOnlyLock(buff);
+    return status;
 }
 
 /** we need to implement this, because we need to use the motorUpdateStatus_ function
