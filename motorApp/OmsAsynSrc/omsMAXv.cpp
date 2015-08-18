@@ -18,6 +18,9 @@ USAGE...        Pro-Dex OMS MAXv asyn motor controller support
 #include <epicsInterrupt.h>
 #include <epicsExit.h>
 #include "omsMAXv.h"
+#ifdef HAS_IOOPS_H
+#include "basicIoOps.h"
+#endif
 
 static const char *driverName = "omsMAXvAsyn";
 
@@ -42,6 +45,77 @@ epicsUInt32 omsMAXv::baseInterruptVector = OMS_INT_VECTOR;
 epicsUInt8 omsMAXv::interruptLevel = OMS_INT_LEVEL;
 epicsAddressType omsMAXv::addrType = atVMEA16;
 
+static void writeReg8(volatile epicsUInt8 *a8, epicsUInt8 value)
+{
+#ifdef HAS_IOOPS_H
+    out_8(a8, value);
+#else
+    *a8 = value;
+#endif
+}
+
+static epicsUInt8 readReg8(volatile epicsUInt8 *a8)
+{
+#ifdef HAS_IOOPS_H
+    return in_8(a8);
+#else
+    epicsUInt8 value;
+
+    value = *a8;
+    return(value);
+#endif
+}
+
+static void writeReg16(volatile epicsUInt16 *a16, epicsUInt16 value)
+{
+#ifdef HAS_IOOPS_H
+    out_be16(a16, value);
+#else
+    *a16 = value;
+#endif
+}
+
+static epicsUInt16 readReg16(volatile epicsUInt16 *a16)
+{
+#ifdef HAS_IOOPS_H
+    return in_be16(a16);
+#else
+    epicsUInt16 value;
+
+    value = *a16;
+    return(value);
+#endif
+}
+
+static void writeReg32(volatile epicsUInt32 *a32, epicsUInt32 value)
+{
+#ifdef HAS_IOOPS_H
+    out_be32(a32, value);
+#else
+    *a32 = value;
+#endif
+}
+
+static epicsUInt32 readReg32(volatile epicsUInt32 *a32)
+{
+#ifdef HAS_IOOPS_H
+    return in_be32(a32);
+#else
+    epicsUInt32 value;
+
+    value = *a32;
+    return(value);
+#endif
+}
+
+static void readRegMem(char *bufptr, volatile char *memptr, int size)
+{
+    memcpy(bufptr, (const void *)memptr, size);
+#ifdef HAS_IOOPS_H
+    iobarrier_r();
+#endif
+}
+
 void omsMAXv::InterruptHandler( void * param )
 {
     omsMAXv* pController = (omsMAXv*) param;
@@ -49,7 +123,7 @@ void omsMAXv::InterruptHandler( void * param )
     STATUS1 status1_flag;
     static char errmsg[65];
 
-    status1_flag.All = pmotor->status1_flag.All;
+    status1_flag.All = readReg32(&(pmotor->status1_flag.All));
 
     /* Motion done handling */
     if (status1_flag.Bits.done != 0) epicsEventSignal(pController->pollEventId_);
@@ -66,12 +140,12 @@ void omsMAXv::InterruptHandler( void * param )
     if (status1_flag.Bits.text_response != 0)  status1_flag.Bits.text_response = 0;
 
     /* Release IRQ's. Clear bits by writing a 1 */
-    pmotor->status1_flag.All = status1_flag.All;
+    writeReg32(&(pmotor->status1_flag.All), status1_flag.All);
 
     /* do a dummy read to ensure that all previous writes, which may
      * have been queued in the VME bridge chip get processed
      */
-    status1_flag.All = pmotor->status1_flag.All;
+    status1_flag.All = readReg32(&(pmotor->status1_flag.All));
 
 }
 omsMAXv::omsMAXv(const char* portName, int numAxes, int cardNo, const char* initString,
@@ -199,32 +273,35 @@ void omsMAXv::initialize(const char* portName, int numAxes, int cardNo, const ch
     Debug(64, "motor_init: pmotor = %p\n", pmotor);
 
     int loopCount=15;
-    while (loopCount && (pmotor->firmware_status.Bits.initializing == 1)){
+    FIRMWARE_STATUS fwStatus;
+    fwStatus.All = readReg32(&(pmotor->firmware_status.All));
+    while (loopCount && (fwStatus.Bits.initializing == 1)){
         Debug(1, "MAXv port %s still initializing; status = 0x%x\n",
                 portName, (unsigned int) pmotor->firmware_status.All);
         epicsThreadSleep(0.2);
+        fwStatus.All = readReg32(&(pmotor->firmware_status.All));
         --loopCount;
     }
 
     Debug(64, "motor_init: check if card is ready\n");
 
-    if (pmotor->firmware_status.Bits.running == 0)
+    fwStatus.All = readReg32(&(pmotor->firmware_status.All));
+    if (fwStatus.Bits.running == 0)
         errlogPrintf("MAXv port %s is NOT running; status = 0x%x\n",
                 portName, (unsigned int) pmotor->firmware_status.All);
 
     Debug(64, "motor_init: init card\n");
 
-    FIRMWARE_STATUS fwStatus;
-    fwStatus.All = pmotor->firmware_status.All;
+    fwStatus.All = readReg32(&(pmotor->firmware_status.All));
     Debug(64, "motor_init: firmware status register: 0x%x\n", fwStatus.All);
 
-    pmotor->IACK_vector = intrVector;
+    writeReg32(&(pmotor->IACK_vector), intrVector);
 
-    pmotor->status1_flag.All = 0xFFFFFFFF;
-    pmotor->status2_flag = 0xFFFFFFFF;
+    writeReg32(&(pmotor->status1_flag.All), 0xFFFFFFFF);
+    writeReg32(&(pmotor->status2_flag), 0xFFFFFFFF);
     /* Disable all interrupts */
-    pmotor->status1_irq_enable.All = 0;
-    pmotor->status2_irq_enable = 0;
+    writeReg32(&(pmotor->status1_irq_enable.All), 0);
+    writeReg32(&(pmotor->status2_irq_enable), 0);
 
     Debug(64, "motor_init: clear all interrupt\n");
     //sendOnly("IC");
@@ -271,7 +348,7 @@ void omsMAXv::initialize(const char* portName, int numAxes, int cardNo, const ch
 void omsMAXv::resetIntr()
 {
     enabled=false;
-    pmotor->status1_irq_enable.All = 0;
+    writeReg32(&(pmotor->status1_irq_enable.All), 0);
 }
 
 asynStatus omsMAXv::sendOnly(const char *outputBuff)
@@ -280,7 +357,7 @@ asynStatus omsMAXv::sendOnly(const char *outputBuff)
     const char* functionName = "sendOnly";
     int len = strlen(outputBuff);
     double timeout = 0.01;
-    epicsUInt16 getIndex, putIndex;
+    epicsUInt32 getIndex, putIndex;
 
     if (!enabled) return asynError;
     Debug(16, "omsMAXv::send: sending: %s \n", outputBuff);
@@ -293,23 +370,29 @@ asynStatus omsMAXv::sendOnly(const char *outputBuff)
     }
 
     /* see if junk at input port - should not be any data available */
+    getIndex = readReg32(&(pmotor->inGetIndex));
+    putIndex = readReg32(&(pmotor->inPutIndex));
     int flushTime = 0;
-    while (((epicsUInt16) pmotor->inGetIndex != (epicsUInt16) pmotor->inPutIndex) && (flushTime < 100))
+    while ((getIndex != putIndex) && (flushTime < 100))
     {
         // flush cards response Buffer
 #ifdef DEBUG
-        int deltaIndex = ((epicsUInt16)pmotor->inPutIndex) - ((epicsUInt16)pmotor->inGetIndex);
+        int deltaIndex = ((epicsUInt16)putIndex) - ((epicsUInt16)getIndex);
         Debug(32, "%s:%s:%s: flushing %d characters\n",
                 driverName, functionName, portName, (((deltaIndex < 0) ? BUFFER_SIZE +
                         deltaIndex : deltaIndex)));
 #endif
-        putIndex = (epicsUInt16) pmotor->inPutIndex;
-        pmotor->inGetIndex = putIndex;
-        pmotor->status1_flag.Bits.text_response = 0;
-        flag1.All = pmotor->status1_flag.All;
-        pmotor->status1_flag.All = flag1.All;
-        pmotor->msg_semaphore=0;
+        putIndex = readReg32(&(pmotor->inPutIndex));
+	writeReg32(&(pmotor->inGetIndex), putIndex);
+        //pmotor->status1_flag.Bits.text_response = 0;
+        epicsUInt32 t_status = readReg32(&(pmotor->status1_flag.All));
+        writeReg32(&(pmotor->status1_flag.All), (t_status & 0xfdffffff));
+        flag1.All = readReg32(&(pmotor->status1_flag.All));
+        writeReg32(&(pmotor->status1_flag.All), flag1.All);
+        writeReg32(&(pmotor->msg_semaphore), 0);
         epicsThreadSleep(timeout);
+        getIndex = readReg32(&(pmotor->inGetIndex));
+        putIndex = readReg32(&(pmotor->inPutIndex));
         flushTime++;
         if (flushTime == 100 ) {
         	Debug(1, "%s:%s:%s: unable to flush more than 100 strings\n", driverName, functionName, portName);
@@ -317,27 +400,33 @@ asynStatus omsMAXv::sendOnly(const char *outputBuff)
         }
     }
 
-    putIndex = (epicsUInt16) pmotor->outPutIndex;
-    getIndex = (epicsUInt16) pmotor->outGetIndex;
+    putIndex = readReg32(&(pmotor->outPutIndex));
+    getIndex = readReg32(&(pmotor->outGetIndex));
 
     for (int i = 0; (i < len); i++) {
-        pmotor->outBuffer[putIndex++]= outputBuff[i];
+        writeReg8(&(pmotor->outBuffer[putIndex++]), outputBuff[i]);
         if (putIndex >= BUFFER_SIZE) putIndex = 0;
     }
 
-    pmotor->outPutIndex = putIndex;    /* Message Sent */
+    writeReg32(&(pmotor->outPutIndex), putIndex);	/* Message Sent */
 
     int count = 0, prevdeltaIndex = 0, index = 0;
     int maxcount = (int)(0.1 / epicsThreadSleepQuantum());
     // skip busy-waiting for small epicsThreadSleepQuantum
     if (epicsThreadSleepQuantum() <= 0.01) index = 100;
-    int deltaIndex = ((epicsUInt16)pmotor->outPutIndex) - ((epicsUInt16)pmotor->outGetIndex);
+    putIndex = readReg32(&(pmotor->outPutIndex));
+    getIndex = readReg32(&(pmotor->outGetIndex));
+    int deltaIndex = ((epicsUInt16)putIndex) - ((epicsUInt16)getIndex);
     while ((deltaIndex != 0) && (count <= maxcount))
     {
-        deltaIndex  = ((epicsUInt16)pmotor->outPutIndex) - ((epicsUInt16)pmotor->outGetIndex);
+        putIndex = readReg32(&(pmotor->outPutIndex));
+        getIndex = readReg32(&(pmotor->outGetIndex));
+        deltaIndex  = ((epicsUInt16)putIndex) - ((epicsUInt16)getIndex);
         //  do busy-waiting but not more than 100 times
         while ((index < 100) && (deltaIndex != 0)){
-            deltaIndex  = ((epicsUInt16)pmotor->outPutIndex) - ((epicsUInt16)pmotor->outGetIndex);
+            putIndex = readReg32(&(pmotor->outPutIndex));
+            getIndex = readReg32(&(pmotor->outGetIndex));
+            deltaIndex  = ((epicsUInt16)putIndex) - ((epicsUInt16)getIndex);
             ++index;
         }
         if ((index >= 100) && (deltaIndex != 0)) epicsThreadSleep(timeout);
@@ -385,7 +474,8 @@ asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigne
     double timeout = 0.1;
     // skip busy-waiting for small epicsThreadSleepQuantum
     if (epicsThreadSleepQuantum() <= 0.01) itera = 2001;
-    while ((pmotor->status1_flag.Bits.text_response == 0) && (time < timeout)){
+    flag1.All = readReg32(&(pmotor->status1_flag.All));
+    while ((flag1.Bits.text_response == 0) && (time < timeout)){
         Debug(32, "%s:%s:%s: Waiting for reponse, itera:%d\n",
                 driverName, functionName, portName, itera);
         //  busy-waiting but not more than 2000 times
@@ -393,25 +483,27 @@ asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigne
             time += epicsThreadSleepQuantum();
             epicsThreadSleep(epicsThreadSleepQuantum());
         }
+        flag1.All = readReg32(&(pmotor->status1_flag.All));
         itera++;
     }
 
-    if (pmotor->status1_flag.Bits.text_response == 0)
+    flag1.All = readReg32(&(pmotor->status1_flag.All));
+    if (flag1.Bits.text_response == 0)
     {
         Debug(1, "%s:%s:%s: Timeout occurred , %s\n",
         		driverName, functionName, portName, outputBuff);
         return asynTimeout;
     }
 
-    getIndex = (epicsUInt16) pmotor->inGetIndex;
-    putIndex = (epicsUInt16) pmotor->inPutIndex;
+    getIndex = readReg32(&(pmotor->inGetIndex));
+    putIndex = readReg32(&(pmotor->inPutIndex));
     bufsize  = putIndex - getIndex;
     start  = (char *) &pmotor->inBuffer[getIndex];
     end    = (char *) &pmotor->inBuffer[putIndex];
 
     if (start < end) {   /* Test for message wraparound in buffer. */
     	usedSpace = MIN(bufsize, inputSize);
-        memcpy(inputBuff, start, usedSpace);
+        readRegMem(inputBuff, start, usedSpace);
     }
     else
     {
@@ -419,9 +511,9 @@ asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigne
         size_t firstPart = ((char *) &pmotor->inBuffer[BUFFER_SIZE]) - start;
 
         usedSpace = MIN(firstPart, inputSize);
-        memcpy(inputBuff, start, usedSpace);
+        readRegMem(inputBuff, start, usedSpace);
         size_t copySize = MIN(bufsize - firstPart, inputSize - usedSpace);
-        memcpy((inputBuff + usedSpace), (const char *) &pmotor->inBuffer[0], copySize);
+        readRegMem((inputBuff + usedSpace), (char *) &(pmotor->inBuffer[0]), copySize);
         usedSpace += copySize;
     }
 
@@ -431,18 +523,22 @@ asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigne
     if (getIndex >= BUFFER_SIZE)
         getIndex -= BUFFER_SIZE;
 
-    while (getIndex != (epicsUInt16)pmotor->inPutIndex)
+    putIndex = readReg32(&(pmotor->inPutIndex));
+    while (getIndex != putIndex)
     {
+        epicsUInt8 t_inBuff = readReg8(&(pmotor->inBuffer[getIndex]));
         Debug(2, "readbuf(): flushed - %d\n", pmotor->inBuffer[getIndex]);
         if (++getIndex > BUFFER_SIZE)
             getIndex = 0;
     }
-    pmotor->status1_flag.Bits.text_response = 0;
+    //pmotor->status1_flag.Bits.text_response = 0;
+    flag1.All = readReg32(&(pmotor->status1_flag.All));
+    writeReg32(&(pmotor->status1_flag.All), (flag1.All & 0xfdffffff));
 
-    pmotor->inGetIndex = (epicsUInt32) getIndex;
-    flag1.All = pmotor->status1_flag.All;
-    pmotor->status1_flag.All = flag1.All;
-    pmotor->msg_semaphore=0;
+    writeReg32(&(pmotor->inGetIndex), (epicsUInt32) getIndex);
+    flag1.All = readReg32(&(pmotor->status1_flag.All));
+    writeReg32(&(pmotor->status1_flag.All), flag1.All);
+    writeReg32(&(pmotor->msg_semaphore), 0);
 
     Debug(16, "omsMAXv::sendReceive: received %s\n", inputBuff);
     return asynSuccess;
@@ -478,8 +574,8 @@ void omsMAXv::motorIsrSetup(volatile unsigned int vector, volatile epicsUInt8 le
     status1_irq.Bits.done = 0xFF;
     status1_irq.Bits.cmndError = 1;
 
-    pmotor->status1_irq_enable.All = status1_irq.All;   /* Enable interrupts. */
-    pmotor->status2_irq_enable = 0x0;
+    writeReg32(&(pmotor->status1_irq_enable.All), status1_irq.All);   /* Enable interrupts. */
+    writeReg32(&(pmotor->status2_irq_enable), 0x0);
 
     Debug(64, "omsMAXv::isrSetup: done\n");
     return;

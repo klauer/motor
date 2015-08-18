@@ -12,6 +12,7 @@ DBD += motorSupport.dbd
 
 INC += motor.h motordevCom.h motordrvCom.h
 INC += motordrvComCode.h
+INC += basicIoOps.h
 
 ifdef ASYN
 INC += motor_interface.h
