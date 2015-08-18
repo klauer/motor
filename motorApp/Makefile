@@ -114,6 +114,9 @@ DIRS += ScriptMotorSrc
 ScriptMotorSrc_DEPEND_DIRS = MotorSrc
 endif
 
+DIRS += SmartMotorAsynSrc
+SmartMotorAsynSrc_DEPEND_DIRS = MotorSrc
+
 endif
 
 # Install the edl files
