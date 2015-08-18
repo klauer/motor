@@ -1,0 +1,49 @@
+===================
+CONFIGURATION NOTES
+===================
+
+
+- Database definition (*.dbd) requirements.
+<App>DBD += devSmartMotorAsynSupport.dbd
+
+- Startup command file (st.cmd) requirements.
+("#"  is used to denote st.cmd comment lines.)
+("#!" is used to denote st.cmd command lines.)
+
+Configure an asyn communications port driver for the Animatics Smar tMotor.  This is done using
+a DIGI TS or RS-232. For example,
+
+## Connect to DIGI TS for Animatics Smart Motor
+## portName, ipAddress:port, priority, disable auto-connect, noProcessEos
+#!drvAsynIPPortConfigure( "L0", "ts-b34-nw01:2107", 0, 0, 0 )
+
+## Create serial port for Animatics Smart Motor
+#!drvAsynSerialPortConfigure("L0","/dev/ttyS0",0,0,0)
+## Configure serial port parameters
+#!asynSetOption("L0", -1, "baud", "9600")
+#!asynSetOption("L0", -1, "bits", "8")
+#!asynSetOption("L0", -1, "parity", "none")
+#!asynSetOption("L0", -1, "stop", "1")
+
+See asyn documentation for details.
+
+# Smart Motor Create
+#     (1) portName           The name of the asyn port that will be created for this driver
+#     (2) SmartPortName      The name of the drvAsynIPPPort that was created previously to connect to the Smart controller
+#     (3) Number of axes     The number of axes that this controller supports
+#     (4) Moving poll period (ms)    The time between polls when any axis is moving
+#     (5) Idle poll period (ms)      The time between polls when no axis is moving
+#!SmartCreateController(S0,L0,1,100,1000)
+
+
+# Load records
+#!dbLoadRecords("db/asynRecord.db","P=MOTR:B34:,R=ASYN,PORT=L0,ADDR=0,IMAX=100,OMAX=100")
+#!dbLoadRecords("db/basic_asyn_motor.db","PORT=S0,ADDR=0")
+
+
+-------------------
+asyn model 3 driver
+-------------------
+SmartMotorDriver.cpp
+SmartMotorDriver.h
+SmartMotorSupport.dbd

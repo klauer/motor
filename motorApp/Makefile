@@ -108,6 +108,9 @@ PhytronSrc_DEPEND_DIRS = MotorSrc
 DIRS += AMCISrc
 AMCISrc_DEPEND_DIRS = MotorSrc
 
+DIRS += SmartMotorAsynSrc
+SmartMotorAsynSrc_DEPEND_DIRS = MotorSrc
+
 endif
 
 # Install the edl files
