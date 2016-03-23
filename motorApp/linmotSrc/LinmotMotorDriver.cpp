@@ -32,7 +32,7 @@ March 4, 2011
  *
  */
 
-/* MAIN_STATE */
+/* MAIN_STATE 
 #define NOT_READY          0x00
 #define SWITCH_ON_DISABLED 0x01
 #define READY_TO_SWITCH_ON 0x02
@@ -52,28 +52,87 @@ March 4, 2011
 #define LINEARIZING        0x11
 #define PHASE_SEARCHING    0x12
 #define SPECIAL_MODE_      0x13
+*/
 
+struct stateVar
+{
+  enum state
+  {
+    NOT_READY = 0x0000,
+    SWITCH_ON_DISABLED = 0x0100,
+    READY_TO_SWITCH_ON = 0x0200,
+    SETUP_ERROR = 0x0300,
+    ERROR = 0x0400,
+    HW_TEST = 0x0500,
+    READY_TO_OPERATE = 0x0600,
+    OPERATION_ENABLED = 0x0800,
+    HOMING = 0x0900,
+    HOMING_FINISHED = 0x090F,
+    CLEARANCE_CHECK = 0x0A00,
+    CLEARANCE_CHECK_FINISHED = 0x0A0F,
+    GO_TO_INITIAL_POS = 0x0B00,
+    GO_TO_INITIAL_POS_FINISHED = 0x0B0F,
+    ABORTING = 0x0C00,
+    FREEZING = 0x0D00,
+    QUICK_STOP = 0x0E00,
+    GO_TO_POS = 0x0F00,
+    GO_TO_POS_FINISHED = 0x0F0F,
+    JOGGING_POS = 0x1001,    
+    JOGGING_POS_FINISHED = 0x100F,   
+    JOGGING_NEG = 0x1101,    
+    JOGGING_NEG_FINISHED = 0x110F,
+    LINEARIZING = 0x1200,
+    PHASE_SEARCH = 0x1300,
+    SPECIAL_MODE = 0x1400
+  };
+};
 
 /* STATUS WORD */
-#define ENABLED_S           0x0001
-#define SWITCH_ON_S         0x0002
-#define ENABLE_OPERATION_S  0x0004
-#define ERROR_S             0x0008
-#define VOLTAGE_ENABLED_S   0x0010
-#define QUICK_STOP_S        0x0020
-#define SWITCH_ON_LOCKED_S  0x0040
-#define WARNING_S           0x0080
-#define EVENT_HANDLER_S     0x0100
-#define SPECIAL_MODE_S      0x0200
-#define IN_TARGET_POS_S     0x0400
-#define HOMED_S             0x0800
-#define FATAL_ERROR_S       0x1000
-#define MOTION_ACTIVE_S     0x2000
-#define RANGE_IND1_S        0x4000
-#define RANGE_IND2_S        0x8000
+struct statusWord {
+  enum Status
+  {
+    ENABLED            = ( 1 << 0 ),
+    SWITCH_ON          = ( 1 << 1 ),
+    ENABLED_OPERATION  = ( 1 << 2 ),
+    ERROR              = ( 1 << 3 ),
+    VOLTAGE_ENABLED    = ( 1 << 4 ),
+    QUICK_STOP         = ( 1 << 5 ),
+    SWITCH_ON_LOCKED   = ( 1 << 6 ),
+    WARNING            = ( 1 << 7 ),
+    EVENT_HANDLER      = ( 1 << 8 ),
+    SPECIAL_MODE       = ( 1 << 9 ),
+    IN_TARGET_POS      = ( 1 << 10 ),
+    HOMED              = ( 1 << 11 ),
+    FATAL_ERROR        = ( 1 << 12 ),
+    MOTION_ACTIVE      = ( 1 << 13 ),
+    RANGED_IND1        = ( 1 << 14 ),
+    RANGED_IND2        = ( 1 << 15 )
+  };
+};
 
+struct controlWord {
+  enum Control
+  {
+    SWITCH_ON         = ( 1 << 0 ),
+    VOLTAGE_ENABLE    = ( 1 << 1 ),
+    QUICK_STOP        = ( 1 << 2 ),
+    ENABLE_OPERATION  = ( 1 << 3 ),
+    ABORT             = ( 1 << 4 ),
+    FREEZE            = ( 1 << 5 ),
+    GO_TO_POS         = ( 1 << 6 ),
+    ERROR_ACKNOWLEDGE = ( 1 << 7 ),
+    JOG_MOVE_POS      = ( 1 << 8 ),
+    JOG_MOVE_NEG      = ( 1 << 9 ),
+    SPECIAL_MODE      = ( 1 << 10 ),
+    HOME              = ( 1 << 11 ),
+    CLEARANCE_CHECK   = ( 1 << 12 ),
+    GO_TO_INITIAL_POS = ( 1 << 13 ),
+    RESERVED          = ( 1 << 14 ),
+    PHASE_SEARCH      = ( 1 << 15 )
+  };
+};
 
-/** Control Word */
+/** Control Word 
 #define SWITCH_ON         0x0001
 #define VOLTAGE_ENABLE    0x0002
 #define QUICK_STOP        0x0004
@@ -90,7 +149,7 @@ March 4, 2011
 #define GO_TO_INITIAL_POS 0x2000
 #define RESERVED          0x4000
 #define PHASE_SEARCH      0x8000
-
+*/
 
 /** Motion Interface */
 #define VAI_GO_TO_POS       0x0100
@@ -320,10 +379,12 @@ asynStatus LinmotAxis::home(double minVelocity, double maxVelocity, double accel
 {
   asynStatus status = asynSuccess;
   static const char *functionName = "home";
+  epicsInt32 mask;
+
 
   pC_->lock();
-
-  controlWord_ |= HOME;
+  mask = controlWord::HOME;
+  controlWord_ |= mask;
   pC_->write(pC_->controlWordParam_, controlWord_);
 
   pC_->unlock();
@@ -335,15 +396,13 @@ asynStatus LinmotAxis::stop(double acceleration )
 {
   asynStatus status = asynSuccess;
   static const char *functionName = "stopAxis";
-
+  epicsInt32 mask;
   /* clear the ABORT bit to do a quickstop */
 
   pC_->lock();
 
-  controlWord_ &= ~ABORT;
-  pC_->write(pC_->controlWordParam_, controlWord_);
-
-  controlWord_ |= ABORT;
+  mask = controlWord::ABORT;
+  controlWord_ &= ~mask;
   pC_->write(pC_->controlWordParam_, controlWord_);
 
   pC_->unlock();
@@ -360,24 +419,29 @@ asynStatus LinmotAxis::setClosedLoop(bool closedLoop)
 {
   asynStatus status = asynSuccess;
   static const char *functionName = "stopAxis";
-pC_->lock();
+  int mask;
+
+  pC_->lock();
+
 // acknowledge any errors
-  controlWord_ |= ERROR_ACKNOWLEDGE;
-  pC_->write(pC_->controlWordParam_, controlWord_);
+  if ( statusWord_ & statusWord::ERROR ) {
+    mask = controlWord::ERROR_ACKNOWLEDGE;
+    controlWord_ |= mask;
+    pC_->write(pC_->controlWordParam_, controlWord_);
+  
+    epicsThreadSleep(0.05);
+  
+    controlWord_ &= ~mask;
+    pC_->write(pC_->controlWordParam_, controlWord_);
+  
+    epicsThreadSleep(0.05);
+  }
 
-  epicsThreadSleep(0.05);
-
-  controlWord_ &= ~ERROR_ACKNOWLEDGE;
-  pC_->write(pC_->controlWordParam_, controlWord_);
-
-  epicsThreadSleep(0.05);
-
-  if( closedLoop )
-    controlWord_ |= SWITCH_ON; 
+  mask = controlWord::SWITCH_ON;
+  if( closedLoop ) // switch on, reset QUICK_STOP, ABORT, and FREEZE bits (active low)
+    controlWord_ |= ( mask | controlWord::QUICK_STOP | controlWord::ABORT | controlWord::FREEZE );
   else
-    controlWord_ &= ~SWITCH_ON;
-
-  printf("set controlWord_: %d ,set controlWordParam_: %d\n", controlWord_, pC_->controlWordParam_);
+    controlWord_ &= ~mask;
 
   pC_->write(pC_->controlWordParam_, controlWord_);
   if (status != asynSuccess)
@@ -388,7 +452,7 @@ pC_->lock();
   callParamCallbacks();
 
 bail:
-pC_->unlock();
+  pC_->unlock();
   return status;
 }
 
@@ -414,10 +478,14 @@ Parameter 47 type=asynInt32, name=POSStatus.Actualposition, value=-2147483648, s
 asynStatus LinmotAxis::poll(bool *moving)
 { 
   asynStatus comStatus = asynSuccess;
+
+  epicsInt32 mask;
   
   int homed;
   int enabled;
   int error;
+
+
 
   pC_->lock();
   pC_->read( pC_->stateVarParam_,       &stateVar_ );
@@ -427,25 +495,28 @@ asynStatus LinmotAxis::poll(bool *moving)
   pC_->read( pC_->actualPositionParam_, &actualPosition_ );
   pC_->read( pC_->demandCurrentParam_,  &demandCurrent_ );
 
-  homed = statusWord_ & HOMED_S ? 1 : 0;
+  mask = statusWord::HOMED;
+  homed = statusWord_ & mask ? 1 : 0;
   setIntegerParam(pC_->motorStatusHomed_, homed);
-  if( (controlWord_ & HOME) && homed ) {
-    controlWord_ &= ~HOME;
+  if( (controlWord_ & controlWord::HOME) && homed ) {
+    controlWord_ &= ~controlWord::HOME;
     pC_->write( pC_->controlWordParam_, controlWord_ );
   }
-  enabled = statusWord_ & ( ENABLED_S | SWITCH_ON_S | ENABLE_OPERATION_S );
+
+  mask = stateVar::OPERATION_ENABLED;
+  enabled = stateVar_ & mask;
+  setIntegerParam(pC_->motorStatusPowerOn_, enabled);
 
   setDoubleParam(pC_->motorEncoderPosition_, actualPosition_);
   setDoubleParam(pC_->motorPosition_, actualPosition_);
 
-  enabled = statusWord_ & ENABLED_S ? 1 : 0;
-  setIntegerParam(pC_->motorStatusPowerOn_, enabled);
-
-  error = statusWord_ & ERROR_S ? 1 : 0;
+  mask = statusWord::ERROR | statusWord::FATAL_ERROR;
+  error = statusWord_ & mask ? 1 : 0;
   setIntegerParam(pC_->motorStatusProblem_, error);
   
 
-  done_ = !( statusWord_ & MOTION_ACTIVE_S );
+  mask = statusWord::MOTION_ACTIVE;
+  done_ = !( statusWord_ & mask );
   setIntegerParam(pC_->motorStatusDone_, done_);
   *moving = done_ ? false:true;
  
