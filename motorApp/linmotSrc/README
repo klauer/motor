@@ -1,0 +1,45 @@
+===================
+CONFIGURATION NOTES
+===================
+
+
+- Database definition (*.dbd) requirements.
+<App>DBD += EtherCATMotorSupport.dbd
+
+- Startup command file (st.cmd) requirements.
+("#"  is used to denote st.cmd comment lines.)
+("#!" is used to denote st.cmd command lines.)
+
+Configure an asyn communications port driver for DLS EtherCAT.
+
+
+#!dbLoadDatabase("dbd/scantest.dbd")
+#!scantest_registerRecordDeviceDriver(pdbbase)
+
+##ADC_Ethercat_Sampler("RF0", 1, "Ch1Sample.Ch1Value", "Ch1CycleCount.Ch1CycleCount")
+
+## Connect to scanner on /tmp/sock1, creates asyn ports according to chain.xml (scanner.xml)
+#!ecAsynInit("/tmp/sock1", 1000000)
+
+
+## Connect EtherCAT motor driver
+## Ethercat motor create
+##    (1) portName            The name of the asyn port that will be created for this driver
+##    (2) EtherCAT port name  The name of the DLS EtherCAT port that was created for this motor
+##    (3) Number of axes (1)  The number of axes this controller support (currently 1 per asyn port)
+##    (4) Moving poll period (ms)   The time between polls when any axis is moving
+##    (5) Idle poll period (ms)     The time between polls when the axis is idle
+
+
+#!EtherCATCreateController(bkhf0, MOTR0, 1, 500, 1000)
+
+
+# Load records
+#!dbLoadRecords("db/basic_asyn_motor.db","PORT=bkhf0,ADDR=0")
+
+
+asyn model 3 driver
+-------------------
+EtherCATMotorDriver.cpp
+EtherCATMotorDriver.h
+EtherCATMotorSupport.dbd
