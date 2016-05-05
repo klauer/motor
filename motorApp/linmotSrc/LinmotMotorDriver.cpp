@@ -16,7 +16,7 @@ March 4, 2011
 #include <epicsThread.h>
 
 #include <asynInt32SyncIO.h>
-
+#include <asynPortClient.h>
 #include "asynMotorController.h"
 #include "asynMotorAxis.h"
 
@@ -24,6 +24,20 @@ March 4, 2011
 #include "LinmotMotorDriver.h"
 
 #define NUM_Linmot_PARAMS 0
+
+#define stateVarString       "DI.StateVar"
+#define statusWordString     "DI.StatusWord"
+#define warnWordString       "DI.WarnWord"
+#define actualPositionString "DI.ActualPosition"
+#define demandPositionString "DI.DemandPosition"
+#define demandCurrentString  "DI.DemandCurrent"
+#define controlWordString    "DO.ControlWord"
+#define commandHeaderString  "DO.MotionCommandHeader"
+#define commandParam1String  "DO.MotionCommandPar1"
+#define commandParam2String  "DO.MotionCommandPar2"
+#define commandParam3String  "DO.MotionCommandPar3"
+#define commandParam4String  "DO.MotionCommandPar4"
+#define commandParam5String  "DO.MotionCommandPar5"
 
 /** State Var */
 /**
@@ -58,32 +72,32 @@ struct stateVar
 {
   enum state
   {
-    NOT_READY = 0x0000,
-    SWITCH_ON_DISABLED = 0x0100,
-    READY_TO_SWITCH_ON = 0x0200,
-    SETUP_ERROR = 0x0300,
-    ERROR = 0x0400,
-    HW_TEST = 0x0500,
-    READY_TO_OPERATE = 0x0600,
-    OPERATION_ENABLED = 0x0800,
-    HOMING = 0x0900,
-    HOMING_FINISHED = 0x090F,
-    CLEARANCE_CHECK = 0x0A00,
-    CLEARANCE_CHECK_FINISHED = 0x0A0F,
-    GO_TO_INITIAL_POS = 0x0B00,
+    NOT_READY                  = 0x0000,
+    SWITCH_ON_DISABLED         = 0x0100,
+    READY_TO_SWITCH_ON         = 0x0200,
+    SETUP_ERROR                = 0x0300,
+    ERROR                      = 0x0400,
+    HW_TEST                    = 0x0500,
+    READY_TO_OPERATE           = 0x0600,
+    OPERATION_ENABLED          = 0x0800,
+    HOMING                     = 0x0900,
+    HOMING_FINISHED            = 0x090F,
+    CLEARANCE_CHECK            = 0x0A00,
+    CLEARANCE_CHECK_FINISHED   = 0x0A0F,
+    GO_TO_INITIAL_POS          = 0x0B00,
     GO_TO_INITIAL_POS_FINISHED = 0x0B0F,
-    ABORTING = 0x0C00,
-    FREEZING = 0x0D00,
-    QUICK_STOP = 0x0E00,
-    GO_TO_POS = 0x0F00,
-    GO_TO_POS_FINISHED = 0x0F0F,
-    JOGGING_POS = 0x1001,    
-    JOGGING_POS_FINISHED = 0x100F,   
-    JOGGING_NEG = 0x1101,    
-    JOGGING_NEG_FINISHED = 0x110F,
-    LINEARIZING = 0x1200,
-    PHASE_SEARCH = 0x1300,
-    SPECIAL_MODE = 0x1400
+    ABORTING                   = 0x0C00,
+    FREEZING                   = 0x0D00,
+    QUICK_STOP                 = 0x0E00,
+    GO_TO_POS                  = 0x0F00,
+    GO_TO_POS_FINISHED         = 0x0F0F,
+    JOGGING_POS                = 0x1001,    
+    JOGGING_POS_FINISHED       = 0x100F,   
+    JOGGING_NEG                = 0x1101,    
+    JOGGING_NEG_FINISHED       = 0x110F,
+    LINEARIZING                = 0x1200,
+    PHASE_SEARCH               = 0x1300,
+    SPECIAL_MODE               = 0x1400
   };
 };
 
@@ -110,6 +124,29 @@ struct statusWord {
   };
 };
 
+struct warnWord {
+  enum Warn
+  {
+    MOTOR_HOT                 = ( 1 << 0 ),
+    MOTOR_SHORT_TIME_OVERLOAD = ( 1 << 1 ),
+    MOTOR_SUPPLY_VOLTAGE_LOW  = ( 1 << 2 ),
+    MOTOR_SUPPLY_VOLTAGE_HIGH = ( 1 << 3 ),
+    POSITION_LAG_ALWAYS       = ( 1 << 4 ),
+    RESERVED1                 = ( 1 << 5 ),
+    DRIVE_HOT                 = ( 1 << 6 ),
+    MOTOR_NOT_HOMED           = ( 1 << 7 ),
+    PTC_SENSOR1_HOT           = ( 1 << 8 ),
+    RESERVED_PTC2             = ( 1 << 9 ),
+    RR_HOT                    = ( 1 << 10 ),
+    RESERVED2                 = ( 1 << 11 ),
+    RESERVED3                 = ( 1 << 12 ),
+    RESERVED4                 = ( 1 << 13 ),
+    INTERFACE_WARN            = ( 1 << 14 ),
+    APPLICATION_WARN          = ( 1 << 15 ),
+    ANY_WARN                  =  0xFFFF & ~( RESERVED1 | RESERVED2 | RESERVED3 | RESERVED4 )
+  };
+};
+
 struct controlWord {
   enum Control
   {
@@ -132,29 +169,10 @@ struct controlWord {
   };
 };
 
-/** Control Word 
-#define SWITCH_ON         0x0001
-#define VOLTAGE_ENABLE    0x0002
-#define QUICK_STOP        0x0004
-#define ENABLE_OPERATION  0x0008
-#define ABORT             0x0010
-#define FREEZE            0x0020
-#define GO_TO_POS         0x0040
-#define ERROR_ACKNOWLEDGE 0x0080
-#define JOG_POS           0x0100
-#define JOG_NEG           0x0200
-#define SPECIAL_MODE      0x0400
-#define HOME              0x0800
-#define CLEARANCE_CHECK   0x1000
-#define GO_TO_INITIAL_POS 0x2000
-#define RESERVED          0x4000
-#define PHASE_SEARCH      0x8000
-*/
 
 /** Motion Interface */
 #define VAI_GO_TO_POS       0x0100
 #define VAI_INCREMENT_POS   0x0120
-
 
 static const char *driverName = "LinmotMotorDriver";
 
@@ -185,23 +203,26 @@ lock();
       "%s:%s: cannot connect to Linmot controller\n",
       driverName, functionName);
   }
-/* TODO lookup by name */ 
-  controlWordParam_ = 0;
-  motionCommandHeader_ = 1;
-  motionCommandParam1_ = 2;
-  motionCommandParam2_ = 3;
-  motionCommandParam3_ = 4;
-  motionCommandParam4_ = 5;
-  motionCommandParam5_ = 6;
-  stateVarParam_ = 7;
-  statusWordParam_ = 8;
-  warnWordParam_ = 9;
-  demandPositionParam_ = 10;
-  actualPositionParam_ = 11;
-  demandCurrentParam_ = 12;
-  // Wait a short while so that any responses to the above commands have time to arrive so we can flush
-  // them in the next writeReadController()
-  epicsThreadSleep(0.5);
+/* Lookup by name, must match scanner.xml asyn param names */
+  try {
+    stateVar_       = new asynInt32Client(LinmotPortName, 0, stateVarString);
+    statusWord_     = new asynInt32Client(LinmotPortName, 0, statusWordString);
+    warnWord_       = new asynInt32Client(LinmotPortName, 0, warnWordString);
+    actualPosition_ = new asynInt32Client(LinmotPortName, 0, actualPositionString);
+    demandPosition_ = new asynInt32Client(LinmotPortName, 0, demandPositionString);
+    demandCurrent_  = new asynInt32Client(LinmotPortName, 0, demandCurrentString);
+
+    controlWord_    = new asynInt32Client(LinmotPortName, 0, controlWordString);
+    commandHeader_  = new asynInt32Client(LinmotPortName, 0, commandHeaderString);
+    commandParam1_  = new asynInt32Client(LinmotPortName, 0, commandParam1String);
+    commandParam2_  = new asynInt32Client(LinmotPortName, 0, commandParam2String);
+    commandParam3_  = new asynInt32Client(LinmotPortName, 0, commandParam3String);
+    commandParam4_  = new asynInt32Client(LinmotPortName, 0, commandParam4String);
+    commandParam5_  = new asynInt32Client(LinmotPortName, 0, commandParam5String);
+  }
+  catch (...) {
+//error
+  }
 unlock();
 
 // Create the axis objects
@@ -209,18 +230,6 @@ unlock();
     new LinmotAxis(this, axis);
   }
   startPoller(movingPollPeriod, idlePollPeriod, 2);
-}
-
-void LinmotController::write(int reason, epicsInt32 value)
-{
-  pasynUserController_->reason = reason;
-  pasynInt32SyncIO->write(pasynUserController_, value, 1);
-}
-
-void LinmotController::read(int reason, epicsInt32* value)
-{
-  pasynUserController_->reason = reason;
-  pasynInt32SyncIO->read(pasynUserController_, value, 1);
 }
 
 /** Creates a new LinmotController object.
@@ -234,7 +243,7 @@ void LinmotController::read(int reason, epicsInt32* value)
 extern "C" int LinmotCreateController(const char *portName, const char *LinmotPortName, int numAxes, 
                                    int movingPollPeriod, int idlePollPeriod)
 {
-  new LinmotController(portName, LinmotPortName, numAxes, movingPollPeriod/1000., idlePollPeriod/1000.);
+  new LinmotController(portName, LinmotPortName, 1, movingPollPeriod/1000., idlePollPeriod/1000.);
   return(asynSuccess);
 }
 
@@ -301,13 +310,16 @@ asynStatus LinmotAxis::sendCmd( int command, int param1, int param2, int param3,
 {
   asynStatus status = asynSuccess;
   // must increment command counter
+  pC_->lock();
   commandCount_ = (commandCount_ + 1) % 16;
-  pC_->write( pC_->motionCommandParam1_, param1 );
-  pC_->write( pC_->motionCommandParam2_, param2 );
-  pC_->write( pC_->motionCommandParam3_, param3 );
-  pC_->write( pC_->motionCommandParam4_, param4 );
-  pC_->write( pC_->motionCommandParam5_, param5 );
-  pC_->write( pC_->motionCommandHeader_, command | commandCount_ );
+  pC_->commandParam1_->write( param1 );
+  pC_->commandParam2_->write( param2 );
+  pC_->commandParam3_->write( param3 );
+  pC_->commandParam4_->write( param4 );
+  pC_->commandParam5_->write( param5 );
+  pC_->commandHeader_->write(command | commandCount_ );
+  pC_->unlock();
+
   return status;
 }
 
@@ -383,9 +395,10 @@ asynStatus LinmotAxis::home(double minVelocity, double maxVelocity, double accel
 
 
   pC_->lock();
+
   mask = controlWord::HOME;
   controlWord_ |= mask;
-  pC_->write(pC_->controlWordParam_, controlWord_);
+  pC_->controlWord_->write( controlWord_ );
 
   pC_->unlock();
 
@@ -403,7 +416,7 @@ asynStatus LinmotAxis::stop(double acceleration )
 
   mask = controlWord::ABORT;
   controlWord_ &= ~mask;
-  pC_->write(pC_->controlWordParam_, controlWord_);
+  pC_->controlWord_->write( controlWord_ );
 
   pC_->unlock();
 
@@ -427,12 +440,12 @@ asynStatus LinmotAxis::setClosedLoop(bool closedLoop)
   if ( statusWord_ & statusWord::ERROR ) {
     mask = controlWord::ERROR_ACKNOWLEDGE;
     controlWord_ |= mask;
-    pC_->write(pC_->controlWordParam_, controlWord_);
+    pC_->controlWord_->write( controlWord_ );
   
     epicsThreadSleep(0.05);
   
     controlWord_ &= ~mask;
-    pC_->write(pC_->controlWordParam_, controlWord_);
+    pC_->controlWord_->write( controlWord_ );
   
     epicsThreadSleep(0.05);
   }
@@ -443,7 +456,8 @@ asynStatus LinmotAxis::setClosedLoop(bool closedLoop)
   else
     controlWord_ &= ~mask;
 
-  pC_->write(pC_->controlWordParam_, controlWord_);
+  pC_->controlWord_->write( controlWord_ );
+
   if (status != asynSuccess)
     goto bail;
 
@@ -466,14 +480,6 @@ bail:
   * \param[out] moving A flag that is set indicating that the axis is moving (1) or done (0). */
 
 /**
-Parameter 33 type=asynInt32, name=STMStatus.Status__Movingpositive, value=-2147483648, status=0
-Parameter 34 type=asynInt32, name=STMStatus.Status__Movingnegative, value=-2147483648, status=0
-Parameter 40 type=asynInt32, name=POSStatus.Status__Busy, value=-2147483648, status=0
-Parameter 41 type=asynInt32, name=POSStatus.Status__In-Target, value=-2147483648, status=0
-
-Parameter 47 type=asynInt32, name=POSStatus.Actualposition, value=-2147483648, status=0
-
-
 */
 asynStatus LinmotAxis::poll(bool *moving)
 { 
@@ -485,22 +491,23 @@ asynStatus LinmotAxis::poll(bool *moving)
   int enabled;
   int error;
 
-
-
   pC_->lock();
-  pC_->read( pC_->stateVarParam_,       &stateVar_ );
-  pC_->read( pC_->statusWordParam_,      &statusWord_ );
-  pC_->read( pC_->warnWordParam_,       &warnWord_ );
-  pC_->read( pC_->demandPositionParam_, &demandPosition_ );
-  pC_->read( pC_->actualPositionParam_, &actualPosition_ );
-  pC_->read( pC_->demandCurrentParam_,  &demandCurrent_ );
+
+  /* Check linmot variables */
+  pC_->stateVar_->read( &stateVar_ );
+  pC_->statusWord_->read( &statusWord_ );
+  pC_->warnWord_->read( &warnWord_ );
+  pC_->demandPosition_->read( &demandPosition_ );
+  pC_->actualPosition_->read( &actualPosition_ );
+  pC_->demandCurrent_->read( &demandCurrent_ );
+
 
   mask = statusWord::HOMED;
   homed = statusWord_ & mask ? 1 : 0;
   setIntegerParam(pC_->motorStatusHomed_, homed);
   if( (controlWord_ & controlWord::HOME) && homed ) {
     controlWord_ &= ~controlWord::HOME;
-    pC_->write( pC_->controlWordParam_, controlWord_ );
+    pC_->controlWord_->write( controlWord_ );
   }
 
   mask = stateVar::OPERATION_ENABLED;
@@ -525,6 +532,21 @@ asynStatus LinmotAxis::poll(bool *moving)
 // 0 No error
 // 1 Power off
 // 2 Quick stop
+
+//LS IN HIGH
+    if( stateVar_ & ( stateVar::ERROR | 0x87) ) {
+      setIntegerParam(pC_->motorStatusHighLimit_, 1);
+    }
+    else {
+      setIntegerParam(pC_->motorStatusHighLimit_, 0);
+    }
+//LS OUT HIGH
+    if( stateVar_ & ( stateVar::ERROR | 0x88) ) {
+      setIntegerParam(pC_->motorStatusLowLimit_, 1);
+    }
+    else {
+      setIntegerParam(pC_->motorStatusLowLimit_, 0);
+    }
  
   skip:
   callParamCallbacks();
