@@ -9,6 +9,7 @@ March 28, 2011
 
 #include "asynMotorController.h"
 #include "asynMotorAxis.h"
+#include <asynPortClient.h>
 
 class epicsShareClass LinmotAxis : public asynMotorAxis
 {
@@ -71,28 +72,20 @@ public:
   asynStatus readBinaryIO();
 
 protected:
-  void write(int reason, epicsInt32 value);
-  void read(int reason, epicsInt32* value);
+  asynInt32Client *stateVar_;
+  asynInt32Client *statusWord_;
+  asynInt32Client *warnWord_;
+  asynInt32Client *demandPosition_;
+  asynInt32Client *actualPosition_;
+  asynInt32Client *demandCurrent_;
+ 
+  asynInt32Client *controlWord_;
+  asynInt32Client *commandHeader_;
+  asynInt32Client *commandParam1_;
+  asynInt32Client *commandParam2_;
+  asynInt32Client *commandParam3_;
+  asynInt32Client *commandParam4_;
+  asynInt32Client *commandParam5_;
 
-
-  /* Inputs */
-  int stateVarParam_;
-  int statusWordParam_;
-  int warnWordParam_;
-  int demandPositionParam_;
-  int actualPositionParam_;
-  int demandCurrentParam_;
-
-  /* Outputs */
-
-  int controlWordParam_;
-  int motionCommandHeader_;
-  int motionCommandParam1_;
-  int motionCommandParam2_;
-  int motionCommandParam3_;
-  int motionCommandParam4_;
-  int motionCommandParam5_;
-private:
-  
 friend class LinmotAxis;
 };
