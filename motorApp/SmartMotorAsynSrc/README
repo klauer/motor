@@ -30,10 +30,11 @@ See asyn documentation for details.
 # Smart Motor Create
 #     (1) portName           The name of the asyn port that will be created for this driver
 #     (2) SmartPortName      The name of the drvAsynIPPPort that was created previously to connect to the Smart controller
-#     (3) Number of axes     The number of axes that this controller supports
-#     (4) Moving poll period (ms)    The time between polls when any axis is moving
-#     (5) Idle poll period (ms)      The time between polls when no axis is moving
-#!SmartCreateController(S0,L0,1,100,1000)
+#     (3) Number of real axes        The number of real axes that this controller supports (normally 1, if serial or CANbus daisy chained, then more)
+#     (4) Number of virtual axes     The number of virtual axes (usual case is 0)  
+#     (5) Moving poll period (ms)    The time between polls when any axis is moving
+#     (6) Idle poll period (ms)      The time between polls when no axis is moving
+#!SmartCreateController(S0,L0,1,0,100,1000)
 
 
 # Load records
@@ -47,3 +48,13 @@ asyn model 3 driver
 SmartMotorDriver.cpp
 SmartMotorDriver.h
 SmartMotorSupport.dbd
+
+
+-------------------
+Virtual axis
+-------------------
+If all your motors are Class5 and do have a CAN option enabled and CAN connection active,
+then you can write a subroutine on a SmartMotor Controller and link it to a virtual axis,
+and then use a virtual axis to trigger that subroutine that can start coordinated motion, 
+desired sequence of motion, ...
+This feature was developed for SLAC LCLS-II HGVPU project...

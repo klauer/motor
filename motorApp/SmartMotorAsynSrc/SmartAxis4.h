@@ -38,6 +38,10 @@ protected:
   virtual asynStatus resetFlags();
   virtual asynStatus forcePIDUpdate();
   virtual asynStatus getPID();
+
+
+  asynStatus handleError(int error);
+
 };
 
 #endif
