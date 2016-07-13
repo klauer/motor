@@ -19,6 +19,7 @@ SmartMotorAsyn_SRCS += SmartController.cpp
 SmartMotorAsyn_SRCS += SmartAxisBase.cpp 
 SmartMotorAsyn_SRCS += SmartAxis4.cpp 
 SmartMotorAsyn_SRCS += SmartAxis5.cpp 
+SmartMotorAsyn_SRCS += VirtualAxis.cpp 
 SmartMotorAsyn_LIBS += motor
 SmartMotorAsyn_LIBS += asyn
 SmartMotorAsyn_LIBS += $(EPICS_BASE_IOC_LIBS)

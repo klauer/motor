@@ -54,7 +54,6 @@ static const char *driverName = "SmartAxis4Driver";
 SmartAxis4::SmartAxis4(SmartController *pC, int axisNo)
   : SmartAxisBase(pC, axisNo)
 {
-  asynStatus status = asynSuccess;
   axisNum_ = Smart_addr[axisNo];
   printf("axis NUM %d, %c", axisNum_, axisNum_);
   sampleRate_ = 4096.0;  //sample rate for class 4 motors
@@ -71,7 +70,6 @@ SmartAxis4::SmartAxis4(SmartController *pC, int axisNo)
   getPID();
   setClosedLoop(true);
 
-  skip:
 // assume servo motor with encoder
   setIntegerParam(pC->motorStatusGainSupport_, 1);
   setIntegerParam(pC->motorStatusHasEncoder_, 1);
@@ -363,7 +361,7 @@ asynStatus SmartAxis4::poll(bool *moving)
   if (status) goto skip;
   encoderPosition_ = atof(pC_->inString_);
   setDoubleParam(pC_->motorEncoderPosition_,encoderPosition_);
-  enc0_ = encoderPosition_;
+  enc0_ = (int) encoderPosition_;
   setDoubleParam(pC_->smartCtr0_,enc0_);
   
 
@@ -400,6 +398,7 @@ asynStatus SmartAxis4::poll(bool *moving)
   status = pC_->writeReadController();
   if (status) goto skip;
   currentStatus_ = atoi(pC_->inString_);
+  setIntegerParam(pC_->smartStatus_, currentStatus_);
   done = (currentStatus_ & MOVING)?0:1; // Trajectory in progress
   setIntegerParam(pC_->motorStatusDone_, done);
   *moving = done ? false:true;
@@ -416,60 +415,54 @@ asynStatus SmartAxis4::poll(bool *moving)
 //check for any other error
   motorError = (currentStatus_ & ( TEMP_ERROR | OVERFLOW | ARRAY_INDEX_ERROR | SYNTAX_ERROR | OVERCURRENT | EEPROM_ERROR));
   setIntegerParam(pC_->motorStatusProblem_, motorError ? 1:0);
-//  if(motorError){
-//    handleError(currentStatus_);
-//  }
-//  else{
-//      pC_->setStringParam(axisNum_, pC_->smartError_, "No Error");
-//  }
+  if(motorError){
+    handleError(motorError);
+  }
+  else{
+      pC_->setStringParam(axisNo_, pC_->smartError_, "No Error");
+  }
   sprintf(pC_->outString_, "%cRCTR", axisNum_); // Report actual position
   status = pC_->writeReadController();
   if (status) goto skip;
-  enc1_ = atof(pC_->inString_);
+  enc1_ = atoi(pC_->inString_);
   setDoubleParam(pC_->smartCtr1_,enc1_);
   skip:
   setIntegerParam(pC_->motorStatusCommsError_, status ? 1:0); 
   callParamCallbacks();
   return status;
 }
-/*
-asynStatus SmartAxis4::handleError(int status){
-  static int lastStatus = 0;
+
+asynStatus SmartAxis4::handleError(int error){
   static const char *functionName = "handleError()";
-  asynStatus s = asynSuccess;
-  if (status == lastStatus){
+  asynStatus status = asynSuccess;
+  if(error & TEMP_ERROR){
+    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Temperature Error\n", driverName, functionName);
+    pC_->setStringParam(axisNo_, pC_->smartError_, "Temerature Error");
   }
-  else {
-    lastStatus = status;
-    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: New Errors:\n", driverName, functionName);
-    if(status & TEMP_ERROR){
-      asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Temperature Error\n", driverName, functionName);
-      pC_->setStringParam(axisNum_, pC_->smartError_, "Temerature Error");
-    }
-    if(status & OVERFLOW){
-      asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Overflow Error\n", driverName, functionName);
-      pC_->setStringParam(axisNum_, pC_->smartError_, "Overflow Error");
-    }
-    if(status & ARRAY_INDEX_ERROR){
-      asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Array Index Error\n", driverName, functionName);
-      pC_->setStringParam(axisNum_, pC_->smartError_, "Array Index Error");
-    }
-    if(status & SYNTAX_ERROR){
-      asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Syntax Error\n", driverName, functionName);
-      pC_->setStringParam(axisNum_, pC_->smartError_, "Syntax Error");
-    }
-    if(status & OVERCURRENT){
-      asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Overcurrent Error\n", driverName, functionName);
-      pC_->setStringParam(axisNum_, pC_->smartError_, "Overcurrent Error");
-    }
-    if(status & EEPROM_ERROR){
-      asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: EEPROM Error\n", driverName, functionName);
-      pC_->setStringParam(axisNum_, pC_->smartError_, "EEPROM Error");
-    }
-    else{
-      asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Other Error\n", driverName, functionName);
-      pC_->setStringParam(axisNum_, pC_->smartError_, "Other Error");
-    }
+  else if(error & OVERFLOW){
+    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Overflow Error\n", driverName, functionName);
+    pC_->setStringParam(axisNo_, pC_->smartError_, "Overflow Error");
   }
-  return s;
-}*/
+  else if(error & ARRAY_INDEX_ERROR){
+    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Array Index Error\n", driverName, functionName);
+    pC_->setStringParam(axisNo_, pC_->smartError_, "Array Index Error");
+  }
+  else if(error & SYNTAX_ERROR){
+    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Syntax Error\n", driverName, functionName);
+    pC_->setStringParam(axisNo_, pC_->smartError_, "Syntax Error");
+  }
+  else if(error & OVERCURRENT){
+    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Overcurrent Error\n", driverName, functionName);
+    pC_->setStringParam(axisNo_, pC_->smartError_, "Overcurrent Error");
+  }
+  else if(error & EEPROM_ERROR){
+    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: EEPROM Error\n", driverName, functionName);
+    pC_->setStringParam(axisNo_, pC_->smartError_, "EEPROM Error");
+  }
+  else{
+    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Other Error - status: %d\n", driverName, functionName, status);
+    pC_->setStringParam(axisNo_, pC_->smartError_, "Other Error");
+  }
+ 
+  return status;
+}
