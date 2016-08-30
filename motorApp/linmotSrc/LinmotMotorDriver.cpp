@@ -299,6 +299,9 @@ LinmotAxis::LinmotAxis(LinmotController *pC, int axisNo)
 
   pC_->lock();
   controlWord_ = 0x3E;
+  pC_->controlWord_->read( &controlWord_ );
+  commandCount_ = 0;
+  sendCmd( 0, 0, 0, 0, 0 );
   setIntegerParam(pC->motorStatusGainSupport_, 1);
   setIntegerParam(pC->motorStatusHasEncoder_, 1);
   pC_->unlock();
@@ -317,9 +320,19 @@ asynStatus LinmotAxis::sendCmd( int command, int param1, int param2, int param3,
   pC_->commandParam3_->write( param3 );
   pC_->commandParam4_->write( param4 );
   pC_->commandParam5_->write( param5 );
-  pC_->commandHeader_->write(command | commandCount_ );
+  pC_->commandHeader_->write( command | commandCount_ );
   pC_->unlock();
 
+  printf("sendCmd: \n");
+  printf("   param1: %d\n", param1);
+  printf("   param2: %d\n", param2);
+  printf("   param3: %d\n", param3);
+  printf("   param4: %d\n", param4);
+  printf("   param5: %d\n", param5);
+  printf("   header: %d\n", command);
+  printf("   cmdCnt: %d\n", commandCount_);
+
+epicsThreadSleep(0.05);
   return status;
 }
 
@@ -362,14 +375,22 @@ void LinmotAxis::report(FILE *fp, int level)
 asynStatus LinmotAxis::move(double position, int relative, double minVelocity, double maxVelocity, double acceleration)
 {
   asynStatus status = asynSuccess;
+  epicsInt32 mask;
   // static const char *functionName = "moveAxis";
   
   int pos   = (int) ( position);
-  int velo  = (int) ( maxVelocity * 10 );
-  int accel = (int) ( acceleration * 100 );
-
-  printf("position %d, relative %d, velocity %d, acceleration %d", pos, relative, velo, accel);
+  int velo  = (int) ( maxVelocity  / 10 );
+  int accel = (int) ( acceleration / 100 );
+  epicsInt32 enabled = 0;
+  printf("position %d, relative %d, velocity %d, acceleration %d\n", pos, relative, velo, accel);
  
+  pC_->lock();
+  pC_->getIntegerParam( pC_->motorStatusPowerOn_, &enabled);
+  if ( enabled == 0 ) goto skip;
+  mask = controlWord::ABORT | controlWord::QUICK_STOP | controlWord::FREEZE;
+  controlWord_ |= mask;
+  pC_->controlWord_->write( controlWord_ );
+  epicsThreadSleep( 0.05 ); 
   //scale everything to 0.1 um units..
 
  
@@ -380,9 +401,9 @@ asynStatus LinmotAxis::move(double position, int relative, double minVelocity, d
   else
     status = sendCmd( VAI_INCREMENT_POS, pos, velo, accel, accel );
 
-  pC_->lock();
   done_ = 0;
   setIntegerParam(pC_->motorStatusDone_, done_);
+skip:
   pC_->unlock();
   return status;
 }
@@ -391,15 +412,21 @@ asynStatus LinmotAxis::home(double minVelocity, double maxVelocity, double accel
 {
   asynStatus status = asynSuccess;
   static const char *functionName = "home";
+  epicsInt32 enabled = 0;
   epicsInt32 mask;
 
 
   pC_->lock();
+  pC_->getIntegerParam( pC_->motorStatusPowerOn_, &enabled);
+  if ( enabled == 0 )
+    setClosedLoop( true );
 
   mask = controlWord::HOME;
   controlWord_ |= mask;
   pC_->controlWord_->write( controlWord_ );
+  epicsThreadSleep( 0.05 ); 
 
+skip:
   pC_->unlock();
 
   return status;
@@ -450,7 +477,7 @@ asynStatus LinmotAxis::setClosedLoop(bool closedLoop)
     epicsThreadSleep(0.05);
   }
 
-  mask = controlWord::SWITCH_ON;
+  mask = controlWord::SWITCH_ON | controlWord::ENABLE_OPERATION;
   if( closedLoop ) // switch on, reset QUICK_STOP, ABORT, and FREEZE bits (active low)
     controlWord_ |= ( mask | controlWord::QUICK_STOP | controlWord::ABORT | controlWord::FREEZE );
   else
@@ -510,8 +537,9 @@ asynStatus LinmotAxis::poll(bool *moving)
     pC_->controlWord_->write( controlWord_ );
   }
 
-  mask = stateVar::OPERATION_ENABLED;
-  enabled = stateVar_ & mask;
+  //mask = 0xFFFFFF00; /* clear substate bits */
+  //enabled = ( stateVar_ & mask ) ==  stateVar::OPERATION_ENABLED;
+  enabled = statusWord_ & statusWord::ENABLED;
   setIntegerParam(pC_->motorStatusPowerOn_, enabled);
 
   setDoubleParam(pC_->motorEncoderPosition_, actualPosition_);
@@ -534,14 +562,14 @@ asynStatus LinmotAxis::poll(bool *moving)
 // 2 Quick stop
 
 //LS IN HIGH
-    if( stateVar_ & ( stateVar::ERROR | 0x87) ) {
+    if( stateVar_ == ( stateVar::ERROR | 0x87) ) {
       setIntegerParam(pC_->motorStatusHighLimit_, 1);
     }
     else {
       setIntegerParam(pC_->motorStatusHighLimit_, 0);
     }
 //LS OUT HIGH
-    if( stateVar_ & ( stateVar::ERROR | 0x88) ) {
+    if( stateVar_ == ( stateVar::ERROR | 0x88) ) {
       setIntegerParam(pC_->motorStatusLowLimit_, 1);
     }
     else {
