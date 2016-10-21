@@ -17,10 +17,11 @@ public:
   /* These are the methods we override from the base class */
   EtherCATAxis(class EtherCATController *pC, int axis);
   void report(FILE *fp, int level);
-  asynStatus move(double position, int relative, double min_velocity, double max_velocity, double acceleration);
-  asynStatus moveVelocity(double minVelocity, double maxVelocity, double acceleration);
-  asynStatus stop(double acceleration);
-  asynStatus poll(bool *moving);
+  virtual asynStatus move(double position, int relative, double min_velocity, double max_velocity, double acceleration);
+  virtual asynStatus moveVelocity(double minVelocity, double maxVelocity, double acceleration);
+  virtual asynStatus stop(double acceleration);
+  virtual asynStatus poll(bool *moving);
+  virtual asynStatus setClosedLoop(bool closedLoop);
   
   asynStatus setPosition(double position);
 

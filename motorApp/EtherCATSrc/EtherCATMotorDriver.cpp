@@ -11,6 +11,7 @@ March 4, 2011
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #include <iocsh.h>
 #include <epicsThread.h>
@@ -95,8 +96,6 @@ EtherCATController::EtherCATController(const char *portName, const char *EtherCA
   int axis;
   asynStatus status;
   static const char *functionName = "EtherCATController";
-  int ready;
-  int readyToEnable;
   /* Connect to EtherCAT controller */
   status = pasynInt32SyncIO->connect(EtherCATPortName, 0, &pasynUserController_, NULL);
   if (status) {
@@ -152,11 +151,6 @@ EtherCATController::EtherCATController(const char *portName, const char *EtherCA
     new EtherCATAxis(this, axis);
   }
 
-  stmStatusReadyToEnable_->read( &readyToEnable );
-  stmStatusReady_->read( &ready );
-  if ( readyToEnable ) {
-    stmCtrlEnable_->write( 1 );
-  }
 //POSStatus.Actualposition
   startPoller(movingPollPeriod, idlePollPeriod, 2);
 }
@@ -226,6 +220,20 @@ EtherCATAxis::EtherCATAxis(EtherCATController *pC, int axisNo)
 {
   asynStatus status;
   sprintf(axisName_, "AXIS%d", axisNo);
+  int ready;
+  int readyToEnable;
+
+  /* set gain support for CNEN to enable/disable motor */
+  setIntegerParam(pC_->motorStatusGainSupport_, 1);
+
+  pC_->stmStatusReadyToEnable_->read( &readyToEnable );
+  pC_->stmStatusReady_->read( &ready );
+  if ( readyToEnable ) {
+    setClosedLoop( true );
+  }
+
+  /* Let's enbale the reduce torque mode at startup */
+  pC_->stmCtrlReduceTorque_->write( 1 );
 
 }
 
@@ -266,7 +274,9 @@ void EtherCATAxis::report(FILE *fp, int level)
 asynStatus EtherCATAxis::move(double position, int relative, double minVelocity, double maxVelocity, double acceleration)
 {
   asynStatus status = asynSuccess;
-  // static const char *functionName = "moveAxis";
+  static const char *functionName = "moveAxis";
+  epicsInt32 ready;
+
   pC_->lock();
   if( slaveState_ != slaveState::OP )
     goto skip;
@@ -276,8 +286,12 @@ asynStatus EtherCATAxis::move(double position, int relative, double minVelocity,
   if ( ( (epicsInt32) position < encoderPosition_)  && ( dInput2_ == 1 ) )
     goto skip;
 
+  pC_->stmStatusReady_->read( &ready );
+  if( !ready )
+    goto skip;
+
   pC_->stmCtrlReduceTorque_->write( 0 );
-  pC_->posCtrlTargetPosition_->write( position ); 
+  pC_->posCtrlTargetPosition_->write( (int32_t)position ); 
   pC_->posCtrlVelocity_->write( (int) maxVelocity ); 
   pC_->posCtrlAcceleration_->write( (int) acceleration ); 
   pC_->posCtrlDeceleration_->write( (int) acceleration ); 
@@ -304,6 +318,8 @@ asynStatus EtherCATAxis::moveVelocity(double minVelocity, double maxVelocity, do
   // static const char *functionName = "moveAxis";
   int velocity;
   int sType;
+  epicsInt32 ready;
+
   if ( maxVelocity < 0 ) {
     velocity = abs((int) maxVelocity);
     sType = startType::ENDLESS_MINUS; 
@@ -316,6 +332,10 @@ asynStatus EtherCATAxis::moveVelocity(double minVelocity, double maxVelocity, do
   if( slaveState_ != slaveState::OP )
     goto skip;
   
+  pC_->stmStatusReady_->read( &ready );
+  if( !ready )
+    goto skip;
+
   pC_->posCtrlVelocity_->write( (int) velocity ); 
   pC_->posCtrlAcceleration_->write( (int) acceleration ); 
   pC_->posCtrlDeceleration_->write( (int) acceleration ); 
@@ -339,6 +359,7 @@ asynStatus EtherCATAxis::stop(double acceleration )
   pC_->lock(); 
   //static const char *functionName = "stopAxis";
   pC_->posCtrlExecute_->write( 0 ); 
+  pC_->stmCtrlReduceTorque_->write( 1 );
   motionStarted_ = 0;
   done_ = 1;
   setIntegerParam(pC_->motorStatusDone_, done_);
@@ -360,13 +381,30 @@ asynStatus EtherCATAxis::setPosition(double position)
   pC_->lock(); 
   if( slaveState_ != slaveState::OP )
     goto skip;
-  pC_->encCtrlSetCounterValue_->write( (int) position ); 
+  pC_->encCtrlSetCounterValue_->write( (int32_t)position ); 
   pC_->encCtrlSetCounter_->write( 1 ); 
   epicsThreadSleep(0.1);
   pC_->encCtrlSetCounter_->write( 0 ); 
 
 skip:
   pC_->unlock(); 
+  return status;
+}
+
+asynStatus EtherCATAxis::setClosedLoop(bool closedLoop)
+{
+  asynStatus status = asynSuccess;
+  static const char *functionName = "setClosedLoop";
+
+  pC_->lock();
+
+  pC_->stmCtrlEnable_->write( (epicsInt32) closedLoop );
+
+  setIntegerParam(pC_->motorStatusPowerOn_, closedLoop);
+  callParamCallbacks();
+
+bail:
+  pC_->unlock();
   return status;
 }
 
@@ -396,7 +434,7 @@ asynStatus EtherCATAxis::poll(bool *moving)
   epicsInt32 position;
   int busy;
   int inTarget;
-  int underFlow;
+  //int underFlow;
   int overFlow; 
   int movingPos;
   int movingNeg;
@@ -423,6 +461,7 @@ asynStatus EtherCATAxis::poll(bool *moving)
   }
   
   pC_->posStatusActualPosition_->read( &position );
+  /*
   pC_->posStatusCounterUnderflow_->read( &underFlow );
   if ( underFlow == 1) {
     position = ( position | (epicsInt32) (0x80000000) );
@@ -430,6 +469,16 @@ asynStatus EtherCATAxis::poll(bool *moving)
   encoderPosition_ = position;
   setDoubleParam(pC_->motorEncoderPosition_, position);
   setDoubleParam(pC_->motorPosition_, position);
+  */
+  
+  // The position register comes as a 31-bits word, so let's sign extend it and treat it as a sign value from now on
+  if (position & 0x40000000)
+    position |= 0x80000000;
+
+  encoderPosition_ = (int32_t)position;
+  setDoubleParam(pC_->motorEncoderPosition_, (int32_t)position);
+  setDoubleParam(pC_->motorPosition_, (int32_t)position);
+
   //done_ = ((movingPos_ == 0) && (movingNeg_ = 0)) ? 1:0;
 
   pC_->stmStatusInput1_->read( &dInput1_ );
