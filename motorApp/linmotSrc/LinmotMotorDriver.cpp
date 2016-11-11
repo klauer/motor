@@ -39,6 +39,9 @@ March 4, 2011
 #define commandParam4String  "DO.MotionCommandPar4"
 #define commandParam5String  "DO.MotionCommandPar5"
 
+/* Added for Limit switch */
+#define digitalInputsWordString "UserDefinedInputs.X4Inputs"
+
 /** State Var */
 /**
  *     MAIN_STATE        | SUB STATE
@@ -169,6 +172,14 @@ struct controlWord {
   };
 };
 
+/* Added for Limit switch X4.8 and x4.9 */
+struct digitalInputsWord {
+  enum X4Inputs
+  {
+    LOW_LIMIT  = ( 1 << 6),
+    HIGH_LIMIT = ( 1 << 5)
+  };
+};
 
 /** Motion Interface */
 #define VAI_GO_TO_POS       0x0100
@@ -219,7 +230,10 @@ lock();
     commandParam3_  = new asynInt32Client(LinmotPortName, 0, commandParam3String);
     commandParam4_  = new asynInt32Client(LinmotPortName, 0, commandParam4String);
     commandParam5_  = new asynInt32Client(LinmotPortName, 0, commandParam5String);
-  }
+
+    /* Added for Limit switch */
+    digitalInputsWord_   = new asynInt32Client(LinmotPortName, 0, digitalInputsWordString);  
+}
   catch (...) {
 //error
   }
@@ -323,6 +337,7 @@ asynStatus LinmotAxis::sendCmd( int command, int param1, int param2, int param3,
   pC_->commandHeader_->write( command | commandCount_ );
   pC_->unlock();
 
+#if 0
   printf("sendCmd: \n");
   printf("   param1: %d\n", param1);
   printf("   param2: %d\n", param2);
@@ -331,8 +346,9 @@ asynStatus LinmotAxis::sendCmd( int command, int param1, int param2, int param3,
   printf("   param5: %d\n", param5);
   printf("   header: %d\n", command);
   printf("   cmdCnt: %d\n", commandCount_);
+#endif
 
-epicsThreadSleep(0.05);
+  epicsThreadSleep(0.05);
   return status;
 }
 
@@ -518,6 +534,9 @@ asynStatus LinmotAxis::poll(bool *moving)
   int enabled;
   int error;
 
+  /* Added for Limit switch */
+  int limit;
+
   pC_->lock();
 
   /* Check linmot variables */
@@ -528,6 +547,8 @@ asynStatus LinmotAxis::poll(bool *moving)
   pC_->actualPosition_->read( &actualPosition_ );
   pC_->demandCurrent_->read( &demandCurrent_ );
 
+  /* Added for Limit switch */
+  pC_->digitalInputsWord_->read( &digitalInputsWord_ );
 
   mask = statusWord::HOMED;
   homed = statusWord_ & mask ? 1 : 0;
@@ -555,21 +576,23 @@ asynStatus LinmotAxis::poll(bool *moving)
   setIntegerParam(pC_->motorStatusDone_, done_);
   *moving = done_ ? false:true;
  
-// check limits, these are on the x4.8 and x4.9 connector.  UPID 121Bh describes the
-// limit error behavior
-// 0 No error
-// 1 Power off
-// 2 Quick stop
+// check limits, these are on the x4.8 and x4.9 connector.  UPID 1C85 bits 5 and 6
 
 //LS IN HIGH
-    if( stateVar_ == ( stateVar::ERROR | 0x87) ) {
+   mask = digitalInputsWord::HIGH_LIMIT;
+   limit = digitalInputsWord_ & mask;
+	
+    if( limit != mask ) {
       setIntegerParam(pC_->motorStatusHighLimit_, 1);
     }
     else {
       setIntegerParam(pC_->motorStatusHighLimit_, 0);
     }
 //LS OUT HIGH
-    if( stateVar_ == ( stateVar::ERROR | 0x88) ) {
+   mask = digitalInputsWord::LOW_LIMIT;
+   limit = digitalInputsWord_ & mask;
+
+    if( limit != mask ) {
       setIntegerParam(pC_->motorStatusLowLimit_, 1);
     }
     else {

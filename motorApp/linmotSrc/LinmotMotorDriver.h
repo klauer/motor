@@ -55,6 +55,9 @@ private:
   int demandPosition_;
   int actualPosition_;
   int demandCurrent_;
+
+  int digitalInputsWord_;
+
 friend class LinmotController;
 };
 
@@ -87,5 +90,6 @@ protected:
   asynInt32Client *commandParam4_;
   asynInt32Client *commandParam5_;
 
+  asynInt32Client *digitalInputsWord_;
 friend class LinmotAxis;
 };
