@@ -96,6 +96,14 @@ protected:
   asynInt32Client *digitalInputsWord_;
   asynInt32Client *ethercatCycle_;
 
+  asynInt32Client *cfgStatusWord_;
+  asynInt32Client *cfgIndexIn_;
+  asynInt32Client *cfgValueIn_;
+
+  asynInt32Client *cfgControlWord_;
+  asynInt32Client *cfgIndexOut_;
+  asynInt32Client *cfgValueOut_;
+
   epicsEvent cycleEvent_;
   static bool cycleCallbackRegistered_;
   static void sCycleCallback(void *, asynUser *, epicsInt32 data);

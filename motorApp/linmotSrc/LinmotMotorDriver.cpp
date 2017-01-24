@@ -39,9 +39,19 @@ March 4, 2011
 #define commandParam4String  "DO.MotionCommandPar4"
 #define commandParam5String  "DO.MotionCommandPar5"
 
-// This is hard-coded in ecAsyn...
+// These ethercat master parameter names are hard-coded in ecAsyn:
 #define masterPortName       "MASTER0"
 #define masterCycleString    "Cycle"
+
+// Configuration module parameters - inputs
+#define configStatusWordString  "ConfigModule.StatusWord"
+#define configIndexInString     "ConfigModule.IndexIn"
+#define configValueInString     "ConfigModule.ValueIn"
+
+// Configuration module parameters - outputs
+#define configControlWordString "ConfigModule.ControlWord"
+#define configIndexOutString    "ConfigModule.IndexOut"
+#define configValueOutString    "ConfigModule.ValueOut"
 
 /* Added for Limit switch */
 #define digitalInputsWordString "UserDefinedInputs.X4Inputs"
@@ -219,7 +229,8 @@ lock();
       driverName, functionName);
   }
 /* Lookup by name, must match scanner.xml asyn param names */
-  try {
+try
+{
     stateVar_       = new asynInt32Client(LinmotPortName, 0, stateVarString);
     statusWord_     = new asynInt32Client(LinmotPortName, 0, statusWordString);
     warnWord_       = new asynInt32Client(LinmotPortName, 0, warnWordString);
@@ -235,7 +246,20 @@ lock();
     commandParam4_  = new asynInt32Client(LinmotPortName, 0, commandParam4String);
     commandParam5_  = new asynInt32Client(LinmotPortName, 0, commandParam5String);
 
+    cfgStatusWord_ = new asynInt32Client(LinmotPortName, 0, configStatusWordString);
+    cfgIndexIn_ = new asynInt32Client(LinmotPortName, 0, configIndexInString);
+    cfgValueIn_ = new asynInt32Client(LinmotPortName, 0, configValueInString);
+
+    cfgControlWord_ = new asynInt32Client(LinmotPortName, 0, configControlWordString);
+    cfgIndexOut_ = new asynInt32Client(LinmotPortName, 0, configIndexOutString);
+    cfgValueOut_ = new asynInt32Client(LinmotPortName, 0, configValueOutString);
+
     ethercatCycle_  = new asynInt32Client(masterPortName, 0, masterCycleString);
+    digitalInputsWord_ = new asynInt32Client(LinmotPortName, 0, digitalInputsWordString);
+}
+  catch (...) {
+//error
+}
 
     if (!cycleCallbackRegistered_) {
         // this can be shared among several LinmotController instances
@@ -249,12 +273,6 @@ lock();
                       epicsThreadPriorityMedium,
                       epicsThreadGetStackSize(epicsThreadStackMedium),
                       (EPICSTHREADFUNC)CycleThreadC, (void *)this);
-    /* Added for Limit switch */
-    digitalInputsWord_ = new asynInt32Client(LinmotPortName, 0, digitalInputsWordString);
-}
-  catch (...) {
-//error
-  }
 unlock();
 
 // Create the axis objects
@@ -292,8 +310,8 @@ void LinmotController::sCycleCallback(void *userPvt, asynUser *user, epicsInt32 
 
 static void CycleThreadC(void *drvPvt)
 {
-  LinmotController *pController = (LinmotController*)drvPvt;
-  pController->cycleThreadLoop();
+    LinmotController *pController = (LinmotController*)drvPvt;
+    pController->cycleThreadLoop();
 }
 
 /** Creates a new LinmotController object.
