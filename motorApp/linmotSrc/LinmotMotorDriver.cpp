@@ -39,17 +39,21 @@ March 4, 2011
 #define commandParam4String  "DO.MotionCommandPar4"
 #define commandParam5String  "DO.MotionCommandPar5"
 
+// This is hard-coded in ecAsyn...
+#define masterPortName       "MASTER0"
+#define masterCycleString    "Cycle"
+
 /* Added for Limit switch */
 #define digitalInputsWordString "UserDefinedInputs.X4Inputs"
 
 /** State Var */
 /**
  *     MAIN_STATE        | SUB STATE
- * 15 14 13 12 11 10 9 8 | 7 6 5 4 3 2 1 0 
+ * 15 14 13 12 11 10 9 8 | 7 6 5 4 3 2 1 0
  *
  */
 
-/* MAIN_STATE 
+/* MAIN_STATE
 #define NOT_READY          0x00
 #define SWITCH_ON_DISABLED 0x01
 #define READY_TO_SWITCH_ON 0x02
@@ -94,9 +98,9 @@ struct stateVar
     QUICK_STOP                 = 0x0E00,
     GO_TO_POS                  = 0x0F00,
     GO_TO_POS_FINISHED         = 0x0F0F,
-    JOGGING_POS                = 0x1001,    
-    JOGGING_POS_FINISHED       = 0x100F,   
-    JOGGING_NEG                = 0x1101,    
+    JOGGING_POS                = 0x1001,
+    JOGGING_POS_FINISHED       = 0x100F,
+    JOGGING_NEG                = 0x1101,
     JOGGING_NEG_FINISHED       = 0x110F,
     LINEARIZING                = 0x1200,
     PHASE_SEARCH               = 0x1300,
@@ -189,17 +193,17 @@ static const char *driverName = "LinmotMotorDriver";
 
 /** Creates a new LinmotController object.
   * \param[in] portName          The name of the asyn port that will be created for this driver
-  * \param[in] LinmotPortName       The name of the drvAsynIPPPort that was created previously to connect to the Linmot controller 
-  * \param[in] numAxes           The number of axes that this controller supports 
-  * \param[in] movingPollPeriod  The time between polls when any axis is moving 
-  * \param[in] idlePollPeriod    The time between polls when no axis is moving 
+  * \param[in] LinmotPortName       The name of the drvAsynIPPPort that was created previously to connect to the Linmot controller
+  * \param[in] numAxes           The number of axes that this controller supports
+  * \param[in] movingPollPeriod  The time between polls when any axis is moving
+  * \param[in] idlePollPeriod    The time between polls when no axis is moving
   */
-LinmotController::LinmotController(const char *portName, const char *LinmotPortName, int numAxes, 
+LinmotController::LinmotController(const char *portName, const char *LinmotPortName, int numAxes,
                              double movingPollPeriod, double idlePollPeriod)
-  :  asynMotorController(portName, numAxes, NUM_Linmot_PARAMS, 
-                         asynUInt32DigitalMask, 
+  :  asynMotorController(portName, numAxes, NUM_Linmot_PARAMS,
                          asynUInt32DigitalMask,
-                         ASYN_CANBLOCK | ASYN_MULTIDEVICE, 
+                         asynUInt32DigitalMask,
+                         ASYN_CANBLOCK | ASYN_MULTIDEVICE,
                          1, // autoconnect
                          0, 0)  // Default priority and stack size
 {
@@ -210,7 +214,7 @@ lock();
   /* Connect to Linmot controller */
   status = pasynInt32SyncIO->connect(LinmotPortName, 0, &pasynUserController_, NULL);
   if (status) {
-    asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR, 
+    asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR,
       "%s:%s: cannot connect to Linmot controller\n",
       driverName, functionName);
   }
@@ -231,8 +235,22 @@ lock();
     commandParam4_  = new asynInt32Client(LinmotPortName, 0, commandParam4String);
     commandParam5_  = new asynInt32Client(LinmotPortName, 0, commandParam5String);
 
+    ethercatCycle_  = new asynInt32Client(masterPortName, 0, masterCycleString);
+
+    if (!cycleCallbackRegistered_) {
+        // this can be shared among several LinmotController instances
+        cycleCallbackRegistered_ = true;
+        ethercatCycle_->registerInterruptUser(&sCycleCallback);
+    }
+
+    cycleEventVector_.push_back(&cycleEvent_);
+
+    epicsThreadCreate("CyclicThread",
+                      epicsThreadPriorityMedium,
+                      epicsThreadGetStackSize(epicsThreadStackMedium),
+                      (EPICSTHREADFUNC)CycleThreadC, (void *)this);
     /* Added for Limit switch */
-    digitalInputsWord_   = new asynInt32Client(LinmotPortName, 0, digitalInputsWordString);  
+    digitalInputsWord_ = new asynInt32Client(LinmotPortName, 0, digitalInputsWordString);
 }
   catch (...) {
 //error
@@ -246,15 +264,47 @@ unlock();
   startPoller(movingPollPeriod, idlePollPeriod, 2);
 }
 
+
+void LinmotController::cycleThreadLoop() {
+    int cycle_counter = 0;
+    while (true) {
+        cycleEvent_.wait();
+        // new cycle
+        cycle_counter++;
+        if ((cycle_counter % 100) == 0) {
+            printf("New cycle callback: %d\n", cycle_counter);
+        }
+
+    }
+}
+
+
+void LinmotController::sCycleCallback(void *userPvt, asynUser *user, epicsInt32 data)
+{
+    // static callback
+    std::vector<epicsEvent*> &vec=LinmotController::cycleEventVector_;
+    epicsEvent *evt = NULL;
+    for (std::vector<epicsEvent*>::iterator it=vec.begin(); it != vec.end(); it++) {
+        evt = *it;
+        evt->signal();
+    }
+}
+
+static void CycleThreadC(void *drvPvt)
+{
+  LinmotController *pController = (LinmotController*)drvPvt;
+  pController->cycleThreadLoop();
+}
+
 /** Creates a new LinmotController object.
   * Configuration command, called directly or from iocsh
   * \param[in] portName          The name of the asyn port that will be created for this driver
-  * \param[in] LinmotPortName       The name of the drvAsynIPPPort that was created previously to connect to the Linmot controller 
-  * \param[in] numAxes           The number of axes that this controller supports 
+  * \param[in] LinmotPortName       The name of the drvAsynIPPPort that was created previously to connect to the Linmot controller
+  * \param[in] numAxes           The number of axes that this controller supports
   * \param[in] movingPollPeriod  The time in ms between polls when any axis is moving
-  * \param[in] idlePollPeriod    The time in ms between polls when no axis is moving 
+  * \param[in] idlePollPeriod    The time in ms between polls when no axis is moving
   */
-extern "C" int LinmotCreateController(const char *portName, const char *LinmotPortName, int numAxes, 
+extern "C" int LinmotCreateController(const char *portName, const char *LinmotPortName, int numAxes,
                                    int movingPollPeriod, int idlePollPeriod)
 {
   new LinmotController(portName, LinmotPortName, 1, movingPollPeriod/1000., idlePollPeriod/1000.);
@@ -270,7 +320,7 @@ extern "C" int LinmotCreateController(const char *portName, const char *LinmotPo
   */
 void LinmotController::report(FILE *fp, int level)
 {
-  fprintf(fp, "Linmot motor driver %s, numAxes=%d, moving poll period=%f, idle poll period=%f\n", 
+  fprintf(fp, "Linmot motor driver %s, numAxes=%d, moving poll period=%f, idle poll period=%f\n",
     this->portName, numAxes_, movingPollPeriod_, idlePollPeriod_);
 
   if (level > 0) {
@@ -300,9 +350,9 @@ LinmotAxis* LinmotController::getAxis(int axisNo)
 // These are the LinmotAxis methods
 
 /** Creates a new LinmotAxis object.
-  * \param[in] pC Pointer to the LinmotController to which this axis belongs. 
+  * \param[in] pC Pointer to the LinmotController to which this axis belongs.
   * \param[in] axisNo Index number of this axis, range 0 to pC->numAxes_-1.
-  * 
+  *
   * Initializes register numbers, etc.
   */
 LinmotAxis::LinmotAxis(LinmotController *pC, int axisNo)
@@ -367,8 +417,8 @@ void LinmotAxis::report(FILE *fp, int level)
             "    encoder position=%f\n"
             "    theory position=%f\n"
             "    limits=0x%x\n"
-            "    flags=0x%x\n", 
-            axisNo_, pulsesPerUnit_, 
+            "    flags=0x%x\n",
+            axisNo_, pulsesPerUnit_,
             encoderPosition_, theoryPosition_,
             currentLimits_, currentFlags_);
   }
@@ -393,24 +443,24 @@ asynStatus LinmotAxis::move(double position, int relative, double minVelocity, d
   asynStatus status = asynSuccess;
   epicsInt32 mask;
   // static const char *functionName = "moveAxis";
-  
+
   int pos   = (int) ( position);
   int velo  = (int) ( maxVelocity  / 10 );
   int accel = (int) ( acceleration / 100 );
   epicsInt32 enabled = 0;
   printf("position %d, relative %d, velocity %d, acceleration %d\n", pos, relative, velo, accel);
- 
+
   pC_->lock();
   pC_->getIntegerParam( pC_->motorStatusPowerOn_, &enabled);
   if ( enabled == 0 ) goto skip;
   mask = controlWord::ABORT | controlWord::QUICK_STOP | controlWord::FREEZE;
   controlWord_ |= mask;
   pC_->controlWord_->write( controlWord_ );
-  epicsThreadSleep( 0.05 ); 
+  epicsThreadSleep( 0.05 );
   //scale everything to 0.1 um units..
 
- 
-  if( relative == 0 ) 
+
+  if( relative == 0 )
     status = sendCmd( VAI_GO_TO_POS, pos, velo, accel, accel );
     //status = sendCmd( VAI_GO_TO_POS, (int) position, (int) ( maxVelocity * 10 ), (int) acceleration, (int) acceleration );
 
@@ -440,7 +490,7 @@ asynStatus LinmotAxis::home(double minVelocity, double maxVelocity, double accel
   mask = controlWord::HOME;
   controlWord_ |= mask;
   pC_->controlWord_->write( controlWord_ );
-  epicsThreadSleep( 0.05 ); 
+  epicsThreadSleep( 0.05 );
 
 skip:
   pC_->unlock();
@@ -484,12 +534,12 @@ asynStatus LinmotAxis::setClosedLoop(bool closedLoop)
     mask = controlWord::ERROR_ACKNOWLEDGE;
     controlWord_ |= mask;
     pC_->controlWord_->write( controlWord_ );
-  
+
     epicsThreadSleep(0.05);
-  
+
     controlWord_ &= ~mask;
     pC_->controlWord_->write( controlWord_ );
-  
+
     epicsThreadSleep(0.05);
   }
 
@@ -515,7 +565,7 @@ bail:
 
 
 /** Polls the axis.
-  * This function reads the controller position, encoder position, the limit status, the moving status, 
+  * This function reads the controller position, encoder position, the limit status, the moving status,
   * and the drive power-on status.  It does not current detect following error, etc. but this could be
   * added.
   * It calls setIntegerParam() and setDoubleParam() for each item that it polls,
@@ -525,11 +575,11 @@ bail:
 /**
 */
 asynStatus LinmotAxis::poll(bool *moving)
-{ 
+{
   asynStatus comStatus = asynSuccess;
 
   epicsInt32 mask;
-  
+
   int homed;
   int enabled;
   int error;
@@ -569,19 +619,19 @@ asynStatus LinmotAxis::poll(bool *moving)
   mask = statusWord::ERROR | statusWord::FATAL_ERROR;
   error = statusWord_ & mask ? 1 : 0;
   setIntegerParam(pC_->motorStatusProblem_, error);
-  
+
 
   mask = statusWord::MOTION_ACTIVE;
   done_ = !( statusWord_ & mask );
   setIntegerParam(pC_->motorStatusDone_, done_);
   *moving = done_ ? false:true;
- 
+
 // check limits, these are on the x4.8 and x4.9 connector.  UPID 1C85 bits 5 and 6
 
 //LS IN HIGH
    mask = digitalInputsWord::HIGH_LIMIT;
    limit = digitalInputsWord_ & mask;
-	
+
     if( limit != mask ) {
       setIntegerParam(pC_->motorStatusHighLimit_, 1);
     }
@@ -598,7 +648,7 @@ asynStatus LinmotAxis::poll(bool *moving)
     else {
       setIntegerParam(pC_->motorStatusLowLimit_, 0);
     }
- 
+
   skip:
   callParamCallbacks();
   pC_->unlock();
