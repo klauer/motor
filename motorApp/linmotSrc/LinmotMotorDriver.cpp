@@ -22,6 +22,8 @@ March 4, 2011
 
 #include <epicsExport.h>
 #include "LinmotMotorDriver.h"
+#include "LinmotCurve.h"
+
 
 #define NUM_Linmot_PARAMS 0
 
@@ -307,7 +309,7 @@ void LinmotController::cycleThreadLoop() {
     int status_word, next_control_word;
     int value_in;
 
-    epicsInt32 buffer[1024];
+    epicsInt32 buffer[4096];
     int buffer_idx = -1;
     int curve_id = 10;
     int toggle = 0;
@@ -315,6 +317,10 @@ void LinmotController::cycleThreadLoop() {
     int next_mode_status = -1;
     bool waiting_status = false;
     bool buffer_response = false;
+    bool changed_mode = false;
+
+    // LmPositionTimeCurve curve;
+    LmCurveInfo curve_info;
 
     epicsThreadSleep(10.0);
 
@@ -337,9 +343,12 @@ void LinmotController::cycleThreadLoop() {
         if (cfgValueIn_->read(&value_in) != asynSuccess)
             continue;
 
+        changed_mode = false;
+
         if (waiting_status) {
             if (status_word == next_mode_status) {
                 mode_state++;
+                changed_mode = true;
                 printf("! Reached next mode status\n");
             } else if (status_word == expected_status) {
                 printf("! Got expected status\n");
@@ -356,7 +365,7 @@ void LinmotController::cycleThreadLoop() {
         printf("-- %d mode_state %x status_word %x value_in %x\n",
                 cycle_counter, mode_state, status_word, value_in);
 
-        if (mode_state >= 3) {
+        if (changed_mode && mode_state >= LM_MODE_SETPOINTS) {
             buffer_idx--;
 
             if (buffer_response) {
@@ -366,7 +375,16 @@ void LinmotController::cycleThreadLoop() {
                 }
                 printf("\n");
             }
-            break;
+
+            if (mode_state == LM_MODE_SETPOINTS) {
+                memcpy(&curve_info, buffer, sizeof(curve_info));
+                curve_info.dump();
+            }
+
+            if (mode_state == LM_MODE_SETPOINTS + 1) {
+                printf("done\n");
+                break;
+            }
         }
 
         switch (mode_state) {
@@ -397,9 +415,17 @@ void LinmotController::cycleThreadLoop() {
             break;
 
         case LM_MODE_SETPOINTS:
-            waiting_status = false;
-            buffer_response = false;
-            continue;
+            if (changed_mode) {
+                toggle = 0;
+                buffer_idx = 0;
+            } else {
+                toggle = 1 - toggle;
+            }
+
+            expected_status = 0x404 + toggle;
+            next_mode_status = 0x004 + toggle;
+            buffer_response = !writing;
+            break;
 
         default:
             waiting_status = false;
