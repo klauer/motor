@@ -199,6 +199,10 @@ struct digitalInputsWord {
 #define VAI_GO_TO_POS       0x0100
 #define VAI_INCREMENT_POS   0x0120
 
+
+// Static definitions
+std::vector<epicsEvent*> LinmotController::cycleEventVector_;
+bool LinmotController::cycleCallbackRegistered_ = false;
 static const char *driverName = "LinmotMotorDriver";
 
 /** Creates a new LinmotController object.
@@ -283,16 +287,146 @@ unlock();
 }
 
 
+const epicsInt32 LM_CONFIG_INIT = 0x0F;
+const epicsInt32 LM_CONFIG_CURVE_WRITE = 0x50;
+const epicsInt32 LM_CONFIG_CURVE_MODIFY = 0x53;
+const epicsInt32 LM_CONFIG_CURVE_READ = 0x60;
+
+const epicsInt32 LM_MODE_INIT = 0;
+const epicsInt32 LM_MODE_SEND_COMMAND = 1;
+const epicsInt32 LM_MODE_CURVE_INFO = 2;
+const epicsInt32 LM_MODE_SETPOINTS = 3;
+
+
 void LinmotController::cycleThreadLoop() {
     int cycle_counter = 0;
+
+    bool writing = false;
+    int config_mode = LM_CONFIG_CURVE_READ;
+    int mode_state = 0;
+    int status_word, next_control_word;
+    int value_in;
+
+    epicsInt32 buffer[1024];
+    int buffer_idx = -1;
+    int curve_id = 10;
+    int toggle = 0;
+    int expected_status = -1;
+    int next_mode_status = -1;
+    bool waiting_status = false;
+    bool buffer_response = false;
+
+    epicsThreadSleep(10.0);
+
+    if (strcmp(portName, "MOTOR0")) {
+        printf("Ignoring port %s\n", portName);
+        return;
+    }
+
     while (true) {
         cycleEvent_.wait();
         // new cycle
         cycle_counter++;
-        if ((cycle_counter % 100) == 0) {
+        if ((cycle_counter % 3000) == 0) {
             printf("New cycle callback: %d\n", cycle_counter);
         }
 
+        if (cfgStatusWord_->read(&status_word) != asynSuccess)
+            continue;
+
+        if (cfgValueIn_->read(&value_in) != asynSuccess)
+            continue;
+
+        if (waiting_status) {
+            if (status_word == next_mode_status) {
+                mode_state++;
+                printf("! Reached next mode status\n");
+            } else if (status_word == expected_status) {
+                printf("! Got expected status\n");
+            } else {
+                continue;
+            }
+        }
+
+        if (buffer_response) {
+            buffer[buffer_idx++] = value_in;
+            printf("Read value: %x\n", value_in);
+        }
+
+        printf("-- %d mode_state %x status_word %x value_in %x\n",
+                cycle_counter, mode_state, status_word, value_in);
+
+        if (mode_state >= 3) {
+            buffer_idx--;
+
+            if (buffer_response) {
+                printf("Buffer contents: \n");
+                for (int i=0; i <= buffer_idx; i++) {
+                    printf("%x ", buffer[i]);
+                }
+                printf("\n");
+            }
+            break;
+        }
+
+        switch (mode_state) {
+        case LM_MODE_INIT:
+            next_control_word = LM_CONFIG_INIT;
+            expected_status = 0x0F;
+            next_mode_status = 0x0F;
+            cfgIndexOut_->write(0x0);
+            cfgValueOut_->write(0x0);
+            break;
+
+        case LM_MODE_SEND_COMMAND:
+            expected_status = 0x01;
+            next_mode_status = 0x01;
+
+            cfgIndexOut_->write(curve_id);
+            cfgValueOut_->write(0x0);
+
+            toggle = 1;
+            buffer_idx = 0;
+            break;
+
+        case LM_MODE_CURVE_INFO:
+            toggle = 1 - toggle;
+            expected_status = 0x402 + toggle;
+            next_mode_status = 0x002 + toggle;
+            buffer_response = !writing;
+            break;
+
+        case LM_MODE_SETPOINTS:
+            waiting_status = false;
+            buffer_response = false;
+            continue;
+
+        default:
+            waiting_status = false;
+            continue;
+        }
+
+        waiting_status = true;
+
+        if (mode_state > 0) {
+            next_control_word = ((config_mode + mode_state - 1) << 8) |
+                                 ((mode_state - 1) << 1) | toggle;
+        }
+
+        printf("  toggle %x\n", toggle);
+        printf("  buffer_response %x\n", buffer_response);
+        if (buffer_response) {
+            printf("  buffer_idx %x\n", buffer_idx);
+        }
+        printf("  expected_status %x\n", expected_status);
+        printf("  next_mode_status %x\n", next_mode_status);
+        printf("  next_control_word %x\n", next_control_word);
+        if (writing) {
+            cfgValueOut_->write(0x0);
+            cfgIndexOut_->write(0x0);
+        }
+
+        cfgControlWord_->write(next_control_word);
     }
 }
 
@@ -377,7 +511,7 @@ LinmotAxis::LinmotAxis(LinmotController *pC, int axisNo)
   : asynMotorAxis(pC, axisNo),
     pC_(pC)
 {
-  asynStatus status;
+  // asynStatus status;
 
   pC_->lock();
   controlWord_ = 0x3E;
@@ -495,7 +629,7 @@ skip:
 asynStatus LinmotAxis::home(double minVelocity, double maxVelocity, double acceleration, int forwards)
 {
   asynStatus status = asynSuccess;
-  static const char *functionName = "home";
+  // static const char *functionName = "home";
   epicsInt32 enabled = 0;
   epicsInt32 mask;
 
@@ -510,7 +644,7 @@ asynStatus LinmotAxis::home(double minVelocity, double maxVelocity, double accel
   pC_->controlWord_->write( controlWord_ );
   epicsThreadSleep( 0.05 );
 
-skip:
+// skip:
   pC_->unlock();
 
   return status;
@@ -519,7 +653,7 @@ skip:
 asynStatus LinmotAxis::stop(double acceleration )
 {
   asynStatus status = asynSuccess;
-  static const char *functionName = "stopAxis";
+  // static const char *functionName = "stopAxis";
   epicsInt32 mask;
   /* clear the ABORT bit to do a quickstop */
 
@@ -542,7 +676,7 @@ asynStatus LinmotAxis::stop(double acceleration )
 asynStatus LinmotAxis::setClosedLoop(bool closedLoop)
 {
   asynStatus status = asynSuccess;
-  static const char *functionName = "stopAxis";
+  // static const char *functionName = "stopAxis";
   int mask;
 
   pC_->lock();
@@ -667,7 +801,7 @@ asynStatus LinmotAxis::poll(bool *moving)
       setIntegerParam(pC_->motorStatusLowLimit_, 0);
     }
 
-  skip:
+  // skip:
   callParamCallbacks();
   pC_->unlock();
   return comStatus ? asynError : asynSuccess;
