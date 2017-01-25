@@ -15,7 +15,7 @@ LIBRARY_IOC += LinmotMotor
 DBD += LinmotMotorSupport.dbd
 
 # The following are compiled and added to the Support library
-LinmotMotor_SRCS += LinmotMotorDriver.cpp
+LinmotMotor_SRCS += LinmotMotorDriver.cpp LinmotCurve.cpp
 
 LinmotMotor_LIBS += motor
 LinmotMotor_LIBS += asyn
