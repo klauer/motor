@@ -21,6 +21,9 @@ March 4, 2011
 #include "asynMotorAxis.h"
 
 #include <epicsExport.h>
+#include <string>
+#include <sstream>
+#include <iomanip>
 #include "LinmotMotorDriver.h"
 #include "LinmotCurve.h"
 
@@ -300,7 +303,7 @@ asynStatus LinmotController::deleteCurve(epicsUInt16 curve_id) {
 void LinmotController::cycleThreadLoop() {
     int cycle_counter = 0;
 
-    bool writing = false;
+    bool writing = true;
     int config_mode;
 
     unsigned int mode_state = 0;
@@ -310,18 +313,18 @@ void LinmotController::cycleThreadLoop() {
 
     epicsInt32 buffer[4096]; // TODO
     epicsInt32 *bptr = NULL;
-    std::vector<epicsInt32> send_queue;
+    std::stringstream ss;
 
     int buffer_idx = -1;
     int buffer_len = 0;
     int i;
 
-    int curve_id = 19;
+    int curve_id = 12;
     int toggle = 0;
     int expected_status = -1;
     int next_mode_status = -1;
     int error_code;
-    bool waiting_status = false;
+    bool waiting_for_status = false;
     bool buffer_response = false;
     bool changed_mode = false;
 
@@ -362,9 +365,12 @@ void LinmotController::cycleThreadLoop() {
         if (cfgValueIn_->read(&value_in) != asynSuccess)
             continue;
 
+        // Build state: busy
+        setIntegerParam(profileBuildState_, PROFILE_BUILD_BUSY);
+
         changed_mode = false;
 
-        if (waiting_status) {
+        if (waiting_for_status) {
             if (status_word == next_mode_status) {
                 mode_state++;
                 changed_mode = true;
@@ -376,6 +382,15 @@ void LinmotController::cycleThreadLoop() {
                     error_code = (status_word >> 8) & 0xFF;
                     if (error_code) {
                         printf("Error code is: %x\n", error_code);
+
+                        ss.str("");
+                        ss.clear();
+                        ss << "Errored ";
+                        ss << std::hex << error_code;
+                        const std::string error_message = ss.str();
+                        setStringParam(profileBuildMessage_, error_message.c_str());
+                        setIntegerParam(profileBuildStatus_, PROFILE_STATUS_FAILURE);
+                        setIntegerParam(profileBuildState_, PROFILE_BUILD_DONE);
                         goto cleanup;
                     }
                 }
@@ -410,7 +425,19 @@ void LinmotController::cycleThreadLoop() {
             }
 
             if (mode_state == LM_MODE_SETPOINTS + 1) {
-                printf("done\n");
+                setIntegerParam(profileBuildStatus_, PROFILE_STATUS_SUCCESS);
+                setIntegerParam(profileBuildState_, PROFILE_BUILD_DONE);
+
+                ss.str("");
+                ss.clear();
+                if (writing) {
+                    ss << "Wrote curve " << curve_id;
+                } else {
+                    ss << "Read curve " << curve_id;
+                }
+
+                const std::string status_message = ss.str();
+                setStringParam(profileBuildMessage_, status_message.c_str());
                 goto cleanup;
             }
         }
@@ -423,9 +450,8 @@ void LinmotController::cycleThreadLoop() {
             cfgValueOut_->write(0x0);
 
             if (writing) {
-                printf("deleting curve\n");
+                setStringParam(profileBuildMessage_, "Deleting old curve");
                 deleteCurve(curve_id);
-                printf("done\n");
             }
             break;
 
@@ -446,10 +472,13 @@ void LinmotController::cycleThreadLoop() {
         case LM_MODE_CURVE_INFO:
             if (changed_mode) {
                 if (writing) {
+                    setStringParam(profileBuildMessage_, "Writing curve info");
                     bptr = (epicsInt32*)curve_info;
                     buffer_len = sizeof(LmCurveInfo) >> 2;
                     printf("Sending curve_info:\n");
                     curve_info->dump();
+                } else {
+                    setStringParam(profileBuildMessage_, "Reading curve info");
                 }
             }
 
@@ -465,11 +494,14 @@ void LinmotController::cycleThreadLoop() {
                 buffer_idx = 0;
 
                 if (writing) {
+                    setStringParam(profileBuildMessage_, "Writing positions");
                     bptr = &buffer[0];
                     buffer_len = curve.setpoints.size();
                     for (i=0; i < buffer_len; i++) {
                         buffer[i] = (epicsInt32)(curve.setpoints[i] * LM_POSITION_SCALE);
                     }
+                } else {
+                    setStringParam(profileBuildMessage_, "Reading positions");
                 }
             } else {
                 toggle = 1 - toggle;
@@ -481,7 +513,7 @@ void LinmotController::cycleThreadLoop() {
             break;
 
         default:
-            waiting_status = false;
+            waiting_for_status = false;
             buffer_response = false;
             continue;
         }
@@ -492,12 +524,11 @@ void LinmotController::cycleThreadLoop() {
             if (buffer_len < 0) {
                 printf("  buffer empty (%d)?\n", buffer_len);
             } else {
-                printf("  writing %x\n", *bptr);
                 bptr++;
             }
         }
 
-        waiting_status = true;
+        waiting_for_status = true;
 
         if (mode_state > 0) {
             next_control_word = ((config_mode + mode_state - 1) << 8) |
@@ -520,13 +551,14 @@ void LinmotController::cycleThreadLoop() {
         printf("  wrote value_out %x\n", value_out);
         printf("  dt %f\n", 1000.0 * (epicsTime::getCurrent() - t1));
 #endif
+        callParamCallbacks();
     }
 
 cleanup:
     if (curve_info) {
         delete curve_info;
     }
-
+    callParamCallbacks();
 }
 
 
