@@ -57,6 +57,7 @@ const uint16_t LM_CI_DATA_OFFSET = 70;
 const uint16_t LM_CI_STRING_LENGTH = 22;
 const int LM_CI_NUM_WIZARD_PARAMS = 7;
 const double LM_CI_XLENGTH_SCALE = 1.0e5;
+const double LM_POSITION_SCALE = 1.0e4;
 
 
 const uint32_t LM_CONFIG_INIT = 0x0F;
@@ -91,6 +92,11 @@ struct __attribute__((packed)) LmCurveInfo {
         for (int i=0; i < LM_CI_NUM_WIZARD_PARAMS; i++) {
             wizard_params[i] = 0;
         }
+    }
+
+    uint32_t packed_block_size() {
+        return (((num_setpoints << 18) |
+                 (sizeof(LmCurveInfo) - sizeof(__padding__))) & 0xffffffff);
     }
 
     bool set_name(const char* new_name);

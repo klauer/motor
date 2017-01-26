@@ -300,15 +300,23 @@ asynStatus LinmotController::deleteCurve(epicsUInt16 curve_id) {
 void LinmotController::cycleThreadLoop() {
     int cycle_counter = 0;
 
-    bool writing = false;
-    int config_mode = LM_CONFIG_CURVE_READ;
+    bool writing = true;
+    int config_mode;
+
     unsigned int mode_state = 0;
-    int status_word, next_control_word;
+    int status_word;
+    int next_control_word = 0;
     int value_in;
 
     epicsInt32 buffer[4096]; // TODO
+    epicsInt32 *bptr = NULL;
+    std::vector<epicsInt32> send_queue;
+
     int buffer_idx = -1;
-    int curve_id = 10;
+    int buffer_len = 0;
+    int i;
+
+    int curve_id = 11;
     int toggle = 0;
     int expected_status = -1;
     int next_mode_status = -1;
@@ -316,8 +324,18 @@ void LinmotController::cycleThreadLoop() {
     bool buffer_response = false;
     bool changed_mode = false;
 
-    // LmPositionTimeCurve curve;
-    LmCurveInfo curve_info;
+    if (writing)
+        config_mode = LM_CONFIG_CURVE_WRITE;
+    else
+        config_mode = LM_CONFIG_CURVE_READ;
+
+    std::string curve_name("write_test");
+    LmPositionTimeCurve curve(curve_name, curve_id, 0.01);
+    curve.setpoints.push_back(0.0);
+    curve.setpoints.push_back(1.0);
+    curve.setpoints.push_back(2.0);
+    LmCurveInfo *curve_info = curve.get_curve_info();
+
     epicsTime t1, t2;
 
     epicsThreadSleep(10.0);
@@ -366,48 +384,67 @@ void LinmotController::cycleThreadLoop() {
                 cycle_counter, mode_state, status_word, value_in);
 
         if (changed_mode && mode_state >= LM_MODE_SETPOINTS) {
-            buffer_idx--;
+            if (!writing) {
+                buffer_idx--;
 
-            if (buffer_response) {
-                printf("Buffer contents: \n");
-                for (int i=0; i <= buffer_idx; i++) {
-                    printf("%x ", buffer[i]);
+                if (buffer_response) {
+                    printf("Buffer contents: \n");
+                    for (int i=0; i <= buffer_idx; i++) {
+                        printf("%x ", buffer[i]);
+                    }
+                    printf("\n");
                 }
-                printf("\n");
-            }
 
-            if (mode_state == LM_MODE_SETPOINTS) {
-                memcpy(&curve_info, buffer, sizeof(curve_info));
-                curve_info.dump();
+                if (mode_state == LM_MODE_SETPOINTS) {
+                    memcpy(curve_info, buffer, sizeof(LmCurveInfo));
+                    curve_info->dump();
+                }
             }
 
             if (mode_state == LM_MODE_SETPOINTS + 1) {
                 printf("done\n");
-                break;
+                goto cleanup;
             }
         }
 
         switch (mode_state) {
         case LM_MODE_INIT:
             next_control_word = LM_CONFIG_INIT;
-            expected_status = 0x0F;
-            next_mode_status = 0x0F;
+            expected_status = next_mode_status = 0x0F;
             cfgIndexOut_->write(0x0);
             cfgValueOut_->write(0x0);
+
+            if (writing) {
+                printf("deleting curve\n");
+                deleteCurve(curve_id);
+                printf("done\n");
+            }
             break;
 
         case LM_MODE_SEND_COMMAND:
-            expected_status = 0x01;
-            next_mode_status = 0x01;
+            expected_status = next_mode_status = 0x01;
 
             cfgIndexOut_->write(curve_id);
-            cfgValueOut_->write(0x0);
+            if (writing) {
+                cfgValueOut_->write(curve_info->packed_block_size());
+            } else {
+                cfgValueOut_->write(0x0);
+            }
 
             toggle = 1;
             buffer_idx = 0;
             break;
 
         case LM_MODE_CURVE_INFO:
+            if (changed_mode) {
+                if (writing) {
+                    bptr = (epicsInt32*)curve_info;
+                    buffer_len = sizeof(LmCurveInfo) >> 2;
+                    printf("Sending curve_info:\n");
+                    curve_info->dump();
+                }
+            }
+
             toggle = 1 - toggle;
             expected_status = 0x402 + toggle;
             next_mode_status = 0x002 + toggle;
@@ -418,6 +455,14 @@ void LinmotController::cycleThreadLoop() {
             if (changed_mode) {
                 toggle = 0;
                 buffer_idx = 0;
+
+                if (writing) {
+                    bptr = &buffer[0];
+                    buffer_len = curve.setpoints.size();
+                    for (i=0; i < buffer_len; i++) {
+                        buffer[i] = (epicsInt32)(curve.setpoints[i] * LM_POSITION_SCALE);
+                    }
+                }
             } else {
                 toggle = 1 - toggle;
             }
@@ -433,6 +478,17 @@ void LinmotController::cycleThreadLoop() {
             continue;
         }
 
+        if (writing && (mode_state == LM_MODE_CURVE_INFO || mode_state == LM_MODE_SETPOINTS)) {
+            cfgValueOut_->write(*bptr);
+            buffer_len--;
+            if (buffer_len < 0) {
+                printf("  buffer empty (%d)?\n", buffer_len);
+            } else {
+                printf("  writing %x\n", *bptr);
+                bptr++;
+            }
+        }
+
         waiting_status = true;
 
         if (mode_state > 0) {
@@ -440,6 +496,9 @@ void LinmotController::cycleThreadLoop() {
                                  ((mode_state - 1) << 1) | toggle;
         }
 
+        cfgControlWord_->write(next_control_word);
+
+#if 1 // DEBUG
         printf("  toggle %x\n", toggle);
         printf("  buffer_response %x\n", buffer_response);
         if (buffer_response) {
@@ -447,15 +506,19 @@ void LinmotController::cycleThreadLoop() {
         }
         printf("  expected_status %x\n", expected_status);
         printf("  next_mode_status %x\n", next_mode_status);
-        printf("  next_control_word %x\n", next_control_word);
-        if (writing) {
-            cfgValueOut_->write(0x0);
-            cfgIndexOut_->write(0x0);
-        }
-
-        cfgControlWord_->write(next_control_word);
+        printf("  wrote control_word %x\n", next_control_word);
+        epicsInt32 value_out;
+        cfgValueOut_->read(&value_out);
+        printf("  wrote value_out %x\n", value_out);
         printf("  dt %f\n", 1000.0 * (epicsTime::getCurrent() - t1));
+#endif
     }
+
+cleanup:
+    if (curve_info) {
+        delete curve_info;
+    }
+
 }
 
 
