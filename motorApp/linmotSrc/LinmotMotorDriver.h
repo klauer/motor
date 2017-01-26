@@ -100,6 +100,7 @@ protected:
   asynInt32Client *cfgIndexOut_;
   asynInt32Client *cfgValueOut_;
 
+  // For communicating in sync with ethercat bus cycles:
   epicsEvent cycleEvent_;
   static bool cycleCallbackRegistered_;
   static void sCycleCallback(void *, asynUser *, epicsInt32 data);

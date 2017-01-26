@@ -300,7 +300,7 @@ asynStatus LinmotController::deleteCurve(epicsUInt16 curve_id) {
 void LinmotController::cycleThreadLoop() {
     int cycle_counter = 0;
 
-    bool writing = true;
+    bool writing = false;
     int config_mode;
 
     unsigned int mode_state = 0;
@@ -316,10 +316,11 @@ void LinmotController::cycleThreadLoop() {
     int buffer_len = 0;
     int i;
 
-    int curve_id = 11;
+    int curve_id = 19;
     int toggle = 0;
     int expected_status = -1;
     int next_mode_status = -1;
+    int error_code;
     bool waiting_status = false;
     bool buffer_response = false;
     bool changed_mode = false;
@@ -371,6 +372,13 @@ void LinmotController::cycleThreadLoop() {
             } else if (status_word == expected_status) {
                 printf("! Got expected status\n");
             } else {
+                if ((status_word & 0xFF) == expected_status) {
+                    error_code = (status_word >> 8) & 0xFF;
+                    if (error_code) {
+                        printf("Error code is: %x\n", error_code);
+                        goto cleanup;
+                    }
+                }
                 continue;
             }
         }
