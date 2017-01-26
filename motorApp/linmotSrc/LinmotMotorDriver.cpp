@@ -289,27 +289,16 @@ unlock();
 }
 
 
-const epicsInt32 LM_CONFIG_INIT = 0x0F;
-const epicsInt32 LM_CONFIG_CURVE_WRITE = 0x50;
-const epicsInt32 LM_CONFIG_CURVE_MODIFY = 0x53;
-const epicsInt32 LM_CONFIG_CURVE_READ = 0x60;
-
-const epicsInt32 LM_MODE_INIT = 0;
-const epicsInt32 LM_MODE_SEND_COMMAND = 1;
-const epicsInt32 LM_MODE_CURVE_INFO = 2;
-const epicsInt32 LM_MODE_SETPOINTS = 3;
-
-
 void LinmotController::cycleThreadLoop() {
     int cycle_counter = 0;
 
     bool writing = false;
     int config_mode = LM_CONFIG_CURVE_READ;
-    int mode_state = 0;
+    unsigned int mode_state = 0;
     int status_word, next_control_word;
     int value_in;
 
-    epicsInt32 buffer[4096];
+    epicsInt32 buffer[4096]; // TODO
     int buffer_idx = -1;
     int curve_id = 10;
     int toggle = 0;
@@ -321,6 +310,7 @@ void LinmotController::cycleThreadLoop() {
 
     // LmPositionTimeCurve curve;
     LmCurveInfo curve_info;
+    epicsTime t1, t2;
 
     epicsThreadSleep(10.0);
 
@@ -336,6 +326,8 @@ void LinmotController::cycleThreadLoop() {
         if ((cycle_counter % 3000) == 0) {
             printf("New cycle callback: %d\n", cycle_counter);
         }
+
+        t1 = epicsTime::getCurrent();
 
         if (cfgStatusWord_->read(&status_word) != asynSuccess)
             continue;
@@ -453,6 +445,7 @@ void LinmotController::cycleThreadLoop() {
         }
 
         cfgControlWord_->write(next_control_word);
+        printf("  dt %f\n", 1000.0 * (epicsTime::getCurrent() - t1));
     }
 }
 

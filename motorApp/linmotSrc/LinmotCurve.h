@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 
-const double MAX_CURVE_TIME = 42949.0; // 2**32/1e5;
+const double LM_MAX_CURVE_TIME = 42949.0; // 2**32/1e5;
 
 
 enum LmObjectType {
@@ -57,6 +57,17 @@ const uint16_t LM_CI_DATA_OFFSET = 70;
 const uint16_t LM_CI_STRING_LENGTH = 22;
 const int LM_CI_NUM_WIZARD_PARAMS = 7;
 const double LM_CI_XLENGTH_SCALE = 1.0e5;
+
+
+const uint32_t LM_CONFIG_INIT = 0x0F;
+const uint32_t LM_CONFIG_CURVE_WRITE = 0x50;
+const uint32_t LM_CONFIG_CURVE_MODIFY = 0x53;
+const uint32_t LM_CONFIG_CURVE_READ = 0x60;
+
+const uint32_t LM_MODE_INIT = 0;
+const uint32_t LM_MODE_SEND_COMMAND = 1;
+const uint32_t LM_MODE_CURVE_INFO = 2;
+const uint32_t LM_MODE_SETPOINTS = 3;
 
 
 struct __attribute__((packed)) LmCurveInfo {

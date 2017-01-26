@@ -39,7 +39,7 @@ bool new_position_time_curve(struct LmCurveInfo &ci, double time_sec,
     ci.data_offset = (uint16_t)LM_CI_DATA_OFFSET;
     ci.object_type = (uint16_t)LM_OT_POSITION_VS_TIME;
 
-    if (time_sec <= 0.0 || time_sec >= MAX_CURVE_TIME)
+    if (time_sec <= 0.0 || time_sec >= LM_MAX_CURVE_TIME)
         return false;
 
     ci.num_setpoints = num_setpoints;
@@ -127,5 +127,3 @@ int __curve_test(void)
     delete ci3;
     return 0;
 }
-
-
