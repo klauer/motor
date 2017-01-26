@@ -25,9 +25,6 @@ public:
   virtual asynStatus poll(bool *moving);
   virtual asynStatus setClosedLoop(bool closedLoop);
 
-
-  asynStatus sendCmd( int command, int param1 = 0, int param2 = 0, int param3 = 0, int param4 = 0, int param5 = 0);
-
 private:
   class LinmotController *pC_;      /**< Pointer to the asynMotorController to which this axis belongs.
                                 *   Abbreviated because it is used very frequently */
@@ -47,8 +44,6 @@ private:
   int movingPos_;
   int movingNeg_;
   int motionStarted_;
-
-  int commandCount_;
 
   int controlWord_;       /**< cached copy of the control word */
   int stateVar_;
@@ -75,7 +70,8 @@ public:
   /* These are the methods that are new to this class */
   asynStatus readBinaryIO();
   void cycleThreadLoop();  // This should be private but is called from C function
-
+  asynStatus sendCmd( int command, int param1 = 0, int param2 = 0, int param3 = 0, int param4 = 0, int param5 = 0);
+  asynStatus deleteCurve(epicsUInt16 curve_id);
 
 protected:
   asynInt32Client *stateVar_;
@@ -109,6 +105,8 @@ protected:
   static void sCycleCallback(void *, asynUser *, epicsInt32 data);
   static std::vector<epicsEvent*> cycleEventVector_;
 
+private:
+  int commandCount_;
 friend class LinmotAxis;
 };
 

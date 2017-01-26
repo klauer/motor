@@ -200,6 +200,7 @@ struct digitalInputsWord {
 /** Motion Interface */
 #define VAI_GO_TO_POS       0x0100
 #define VAI_INCREMENT_POS   0x0120
+#define CMD_SET_CURVE_ADDR  0x0500
 
 
 // Static definitions
@@ -276,7 +277,7 @@ try
     cycleEventVector_.push_back(&cycleEvent_);
 
     epicsThreadCreate("CyclicThread",
-                      epicsThreadPriorityMedium,
+                      epicsThreadPriorityHigh,
                       epicsThreadGetStackSize(epicsThreadStackMedium),
                       (EPICSTHREADFUNC)CycleThreadC, (void *)this);
 unlock();
@@ -286,6 +287,13 @@ unlock();
     new LinmotAxis(this, axis);
   }
   startPoller(movingPollPeriod, idlePollPeriod, 2);
+}
+
+
+asynStatus LinmotController::deleteCurve(epicsUInt16 curve_id) {
+    return sendCmd(CMD_SET_CURVE_ADDR,
+                   (0xFFFF0000 | (curve_id & 0xFFFF)),
+                   0, 0, 0, 0);
 }
 
 
@@ -421,6 +429,7 @@ void LinmotController::cycleThreadLoop() {
 
         default:
             waiting_status = false;
+            buffer_response = false;
             continue;
         }
 
@@ -535,8 +544,7 @@ LinmotAxis::LinmotAxis(LinmotController *pC, int axisNo)
   pC_->lock();
   controlWord_ = 0x3E;
   pC_->controlWord_->read( &controlWord_ );
-  commandCount_ = 0;
-  sendCmd( 0, 0, 0, 0, 0 );
+  pC_->sendCmd( 0, 0, 0, 0, 0 );
   setIntegerParam(pC->motorStatusGainSupport_, 1);
   setIntegerParam(pC->motorStatusHasEncoder_, 1);
   pC_->unlock();
@@ -544,19 +552,19 @@ LinmotAxis::LinmotAxis(LinmotController *pC, int axisNo)
 
 }
 
-asynStatus LinmotAxis::sendCmd( int command, int param1, int param2, int param3, int param4, int param5)
+asynStatus LinmotController::sendCmd( int command, int param1, int param2, int param3, int param4, int param5)
 {
   asynStatus status = asynSuccess;
   // must increment command counter
-  pC_->lock();
+  lock();
   commandCount_ = (commandCount_ + 1) % 16;
-  pC_->commandParam1_->write( param1 );
-  pC_->commandParam2_->write( param2 );
-  pC_->commandParam3_->write( param3 );
-  pC_->commandParam4_->write( param4 );
-  pC_->commandParam5_->write( param5 );
-  pC_->commandHeader_->write( command | commandCount_ );
-  pC_->unlock();
+  commandParam1_->write( param1 );
+  commandParam2_->write( param2 );
+  commandParam3_->write( param3 );
+  commandParam4_->write( param4 );
+  commandParam5_->write( param5 );
+  commandHeader_->write( command | commandCount_ );
+  unlock();
 
 #if 0
   printf("sendCmd: \n");
@@ -572,6 +580,7 @@ asynStatus LinmotAxis::sendCmd( int command, int param1, int param2, int param3,
   epicsThreadSleep(0.05);
   return status;
 }
+
 
 /** Reports on status of the driver
   * \param[in] fp The file pointer on which report information will be written
@@ -632,11 +641,11 @@ asynStatus LinmotAxis::move(double position, int relative, double minVelocity, d
 
 
   if( relative == 0 )
-    status = sendCmd( VAI_GO_TO_POS, pos, velo, accel, accel );
+    status = pC_->sendCmd( VAI_GO_TO_POS, pos, velo, accel, accel );
     //status = sendCmd( VAI_GO_TO_POS, (int) position, (int) ( maxVelocity * 10 ), (int) acceleration, (int) acceleration );
 
   else
-    status = sendCmd( VAI_INCREMENT_POS, pos, velo, accel, accel );
+    status = pC_->sendCmd( VAI_INCREMENT_POS, pos, velo, accel, accel );
 
   done_ = 0;
   setIntegerParam(pC_->motorStatusDone_, done_);
