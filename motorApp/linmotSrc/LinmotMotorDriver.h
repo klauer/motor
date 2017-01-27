@@ -12,6 +12,8 @@ March 28, 2011
 #include "asynMotorAxis.h"
 #include <asynPortClient.h>
 #include <vector>
+#include "LinmotCurve.h"
+
 
 class epicsShareClass LinmotAxis : public asynMotorAxis
 {
@@ -71,6 +73,9 @@ public:
   asynStatus readBinaryIO();
   void cycleThreadLoop();  // This should be private but is called from C function
   asynStatus sendCmd( int command, int param1 = 0, int param2 = 0, int param3 = 0, int param4 = 0, int param5 = 0);
+
+  // Curve-related
+  virtual asynStatus buildProfile();
   asynStatus deleteCurve(epicsUInt16 curve_id);
 
 protected:
@@ -113,6 +118,8 @@ protected:
 
 private:
   int commandCount_;
+  bool writeCurve_;
+  LmPositionTimeCurve curveToWrite_;
 friend class LinmotAxis;
 };
 

@@ -353,6 +353,51 @@ cleanup:
 }
 
 
+asynStatus LinmotController::buildProfile() {
+    int st;
+    int timeMode;
+    double time;
+    int numPoints;
+    int writeCurveId;
+    LinmotAxis *axis = (LinmotAxis*)getAxis(0);
+
+    // TODO: if curve writing busy, fail...
+    if (asynMotorController::buildProfile() != asynSuccess)
+        return asynError;
+
+    st |= getIntegerParam(profileTimeMode_, &timeMode);
+    st |= getIntegerParam(profileNumPoints_, &numPoints);
+    st |= getIntegerParam(profileCurveId_, &writeCurveId);
+    st |= getDoubleParam(profileFixedTime_, &time);
+    if (st) return asynError;
+
+    if (timeMode != PROFILE_TIME_MODE_FIXED) {
+        setStringParam(profileBuildMessage_, "Fixed time mode only");
+        goto fail;
+    }
+
+    if (writeCurveId <= 0 || writeCurveId > 200) {
+        setStringParam(profileBuildMessage_, "Invalid curve ID");
+        goto fail;
+    }
+
+    // TODO check numPoints
+    curveToWrite_.name = "buildCurve";
+    curveToWrite_.curve_id = writeCurveId;
+    curveToWrite_.setpoints.clear();
+    curveToWrite_.dt = time;
+    for (int i=0; i < numPoints; i++) {
+        curveToWrite_.setpoints.push_back(axis->profilePositions_[i]);
+    }
+    return asynSuccess;
+
+fail:
+    setIntegerParam(profileBuildStatus_, PROFILE_STATUS_FAILURE);
+    return asynError;
+
+}
+
+
 int __curve_test(void)
 {
     // assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
