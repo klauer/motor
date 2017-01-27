@@ -91,6 +91,8 @@ void LmPositionTimeCurve::set_curve_info(LmCurveInfo &ci) {
 }
 
 
+// TODO: having LinmotController method implementations here is likely to irk
+// real C++ developers
 void LinmotController::cycleThreadLoop() {
     int cycle_counter = 0;
 
@@ -178,10 +180,7 @@ void LinmotController::cycleThreadLoop() {
                         ss.clear();
                         ss << "Errored ";
                         ss << std::hex << error_code;
-                        const std::string error_message = ss.str();
-                        setStringParam(profileBuildMessage_, error_message.c_str());
-                        setIntegerParam(profileBuildStatus_, PROFILE_STATUS_FAILURE);
-                        setIntegerParam(profileBuildState_, PROFILE_BUILD_DONE);
+                        setCurveBuildStatus(ss.str(), PROFILE_BUILD_DONE, PROFILE_STATUS_FAILURE);
                         goto cleanup;
                     }
                 }
@@ -216,9 +215,6 @@ void LinmotController::cycleThreadLoop() {
             }
 
             if (mode_state == LM_MODE_SETPOINTS + 1) {
-                setIntegerParam(profileBuildStatus_, PROFILE_STATUS_SUCCESS);
-                setIntegerParam(profileBuildState_, PROFILE_BUILD_DONE);
-
                 ss.str("");
                 ss.clear();
                 if (writing) {
@@ -227,8 +223,7 @@ void LinmotController::cycleThreadLoop() {
                     ss << "Read curve " << curve_id;
                 }
 
-                const std::string status_message = ss.str();
-                setStringParam(profileBuildMessage_, status_message.c_str());
+                setCurveBuildStatus(ss.str(), PROFILE_BUILD_DONE, PROFILE_STATUS_SUCCESS);
                 goto cleanup;
             }
         }
@@ -354,7 +349,7 @@ cleanup:
 
 
 asynStatus LinmotController::buildProfile() {
-    int st;
+    int st = 0;
     int timeMode;
     double time;
     int numPoints;
@@ -395,6 +390,21 @@ fail:
     setIntegerParam(profileBuildStatus_, PROFILE_STATUS_FAILURE);
     return asynError;
 
+}
+
+asynStatus LinmotController::setCurveBuildStatus(const char *message,
+  ProfileBuildState build_state,
+  ProfileStatus build_status)
+{
+    int st = 0;
+    st |= setStringParam(profileBuildMessage_, message);
+    st |= setIntegerParam(profileBuildState_, build_state);
+    st |= setIntegerParam(profileBuildStatus_, build_status);
+
+    if (st)
+        return asynError;
+    else
+        return asynSuccess;
 }
 
 

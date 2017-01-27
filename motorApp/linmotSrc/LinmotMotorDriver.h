@@ -120,6 +120,15 @@ private:
   int commandCount_;
   bool writeCurve_;
   LmPositionTimeCurve curveToWrite_;
+
+  asynStatus setCurveBuildStatus(const std::string& message,
+                                 ProfileBuildState build_state=PROFILE_BUILD_DONE,
+                                 ProfileStatus build_status=PROFILE_STATUS_SUCCESS) {
+    return setCurveBuildStatus(message.c_str(), build_state, build_status);
+  }
+  asynStatus setCurveBuildStatus(const char *message,
+                                 ProfileBuildState=PROFILE_BUILD_DONE,
+                                 ProfileStatus=PROFILE_STATUS_SUCCESS);
 friend class LinmotAxis;
 };
 
