@@ -100,6 +100,11 @@ protected:
   asynInt32Client *cfgIndexOut_;
   asynInt32Client *cfgValueOut_;
 
+  epicsInt32 profileCurveId_;
+#define LIN_FIRST_PARAM profileCurveId_
+#define LIN_LAST_PARAM profileCurveId_
+#define NUM_Linmot_PARAMS (&LIN_LAST_PARAM - &LIN_FIRST_PARAM + 1)
+
   // For communicating in sync with ethercat bus cycles:
   epicsEvent cycleEvent_;
   static bool cycleCallbackRegistered_;

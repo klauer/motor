@@ -25,8 +25,6 @@ March 4, 2011
 #include "LinmotCurve.h"
 
 
-#define NUM_Linmot_PARAMS 0
-
 #define stateVarString       "DI.StateVar"
 #define statusWordString     "DI.StatusWord"
 #define warnWordString       "DI.WarnWord"
@@ -58,7 +56,7 @@ March 4, 2011
 /* Added for Limit switch */
 #define digitalInputsWordString "UserDefinedInputs.X4Inputs"
 
-// New parameters defined here
+// Linmot-specific parameters defined here
 #define profileCurveIdString    "PROFILE_CURVE_ID"
 
 /** State Var */
@@ -267,7 +265,7 @@ try
     ethercatCycle_  = new asynInt32Client(masterPortName, 0, masterCycleString);
     digitalInputsWord_ = new asynInt32Client(LinmotPortName, 0, digitalInputsWordString);
 
-    // createParam(profileCurveIdString, asynParamInt32, &profileCurveId_);
+    createParam(profileCurveIdString, asynParamInt32, &profileCurveId_);
 }
   catch (...) {
 //error
