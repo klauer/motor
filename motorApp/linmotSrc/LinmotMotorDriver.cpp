@@ -279,10 +279,10 @@ try
 
     cycleEventVector_.push_back(&cycleEvent_);
 
-    epicsThreadCreate("CyclicThread",
+    epicsThreadCreate("CurveAccessThread",
                       epicsThreadPriorityHigh,
                       epicsThreadGetStackSize(epicsThreadStackMedium),
-                      (EPICSTHREADFUNC)CycleThreadC, (void *)this);
+                      (EPICSTHREADFUNC)CurveThreadC, (void *)this);
 unlock();
 
 // Create the axis objects
@@ -312,10 +312,10 @@ void LinmotController::sCycleCallback(void *userPvt, asynUser *user, epicsInt32 
     }
 }
 
-static void CycleThreadC(void *drvPvt)
+static void CurveThreadC(void *drvPvt)
 {
     LinmotController *pController = (LinmotController*)drvPvt;
-    pController->cycleThreadLoop();
+    pController->curveAccessThread();
 }
 
 /** Creates a new LinmotController object.

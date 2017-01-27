@@ -93,7 +93,7 @@ void LmPositionTimeCurve::set_curve_info(LmCurveInfo &ci) {
 
 // TODO: having LinmotController method implementations here is likely to irk
 // real C++ developers
-void LinmotController::cycleThreadLoop() {
+void LinmotController::curveAccessThread() {
     int cycle_counter = 0;
 
     bool writing = true;

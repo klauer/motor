@@ -71,7 +71,7 @@ public:
 
   /* These are the methods that are new to this class */
   asynStatus readBinaryIO();
-  void cycleThreadLoop();  // This should be private but is called from C function
+  void curveAccessThread();  // This should be private but is called from C function
   asynStatus sendCmd( int command, int param1 = 0, int param2 = 0, int param3 = 0, int param4 = 0, int param5 = 0);
 
   // Curve-related
@@ -133,4 +133,4 @@ friend class LinmotAxis;
 };
 
 
-static void CycleThreadC(void *drvPvt);
+static void CurveThreadC(void *drvPvt);
