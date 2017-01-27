@@ -166,15 +166,20 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
             if (status_word == next_mode_status) {
                 mode_state++;
                 changed_mode = true;
+#if DEBUG
                 printf("! Reached next mode status\n");
+#endif
             } else if (status_word == expected_status) {
+#if DEBUG
                 printf("! Got expected status\n");
+#endif
             } else {
                 if ((status_word & 0xFF) == expected_status) {
                     error_code = (status_word >> 8) & 0xFF;
                     if (error_code) {
+#if DEBUG
                         printf("Error code is: %x\n", error_code);
-
+#endif
                         ss.str("");
                         ss.clear();
                         ss << "Errored ";
@@ -247,8 +252,10 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
                     setStringParam(profileBuildMessage_, "Writing curve info");
                     bptr = (epicsInt32*)curve_info;
                     buffer_len = sizeof(LmCurveInfo) >> 2;
+#if DEBUG
                     printf("Sending curve_info:\n");
                     curve_info->dump();
+#endif
                 } else {
                     setStringParam(profileBuildMessage_, "Reading curve info");
                 }
@@ -325,7 +332,7 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
 
         cfgControlWord_->write(next_control_word);
 
-#if 1 // DEBUG
+#if DEBUG
         printf("  toggle %x\n", toggle);
         printf("  buffer_response %x\n", buffer_response);
         if (buffer_response) {
@@ -397,7 +404,6 @@ asynStatus LinmotController::buildProfile() {
     }
 
     writeCurve_ = true;
-    printf("Signalling write...\n");
     curveAccessEvent_.signal();
     return asynSuccess;
 
