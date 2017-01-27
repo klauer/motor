@@ -289,6 +289,11 @@ unlock();
   for (axis=0; axis<numAxes; axis++) {
     new LinmotAxis(this, axis);
   }
+
+  maxProfilePoints_ = LM_MAX_PROFILE_POINTS;
+  initializeProfile(maxProfilePoints_);
+
+  setCurveBuildStatus("Ready", PROFILE_BUILD_DONE, PROFILE_STATUS_SUCCESS);
   startPoller(movingPollPeriod, idlePollPeriod, 2);
 }
 

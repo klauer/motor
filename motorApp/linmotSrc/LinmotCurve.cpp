@@ -94,9 +94,18 @@ void LmPositionTimeCurve::set_curve_info(LmCurveInfo &ci) {
 // TODO: having LinmotController method implementations here is likely to irk
 // real C++ developers
 void LinmotController::curveAccessThread() {
+    while (true) {
+        curveAccessEvent_.wait();
+        curveLock_.lock();
+        curveAccess(curve_, writeCurve_);
+        curveLock_.unlock();
+    }
+}
+
+
+void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
     int cycle_counter = 0;
 
-    bool writing = true;
     int config_mode;
 
     unsigned int mode_state = 0;
@@ -104,15 +113,15 @@ void LinmotController::curveAccessThread() {
     int next_control_word = 0;
     int value_in;
 
-    epicsInt32 buffer[4096]; // TODO
+    epicsInt32 buffer[LM_MAX_PROFILE_POINTS + 2]; // TODO
     epicsInt32 *bptr = NULL;
     std::stringstream ss;
 
     int buffer_idx = -1;
     int buffer_len = 0;
     int i;
+    int curve_id = curve.curve_id;
 
-    int curve_id = 12;
     int toggle = 0;
     int expected_status = -1;
     int next_mode_status = -1;
@@ -120,35 +129,21 @@ void LinmotController::curveAccessThread() {
     bool waiting_for_status = false;
     bool buffer_response = false;
     bool changed_mode = false;
-
-    if (writing)
-        config_mode = LM_CONFIG_CURVE_WRITE;
-    else
-        config_mode = LM_CONFIG_CURVE_READ;
-
-    std::string curve_name("write_test");
-    LmPositionTimeCurve curve(curve_name, curve_id, 0.01);
-    curve.setpoints.push_back(0.0);
-    curve.setpoints.push_back(1.0);
-    curve.setpoints.push_back(2.0);
     LmCurveInfo *curve_info = curve.get_curve_info();
-
     epicsTime t1, t2;
 
-    epicsThreadSleep(10.0);
-
-    if (strcmp(portName, "MOTOR0")) {
-        printf("Ignoring port %s\n", portName);
-        return;
+    if (writing) {
+        config_mode = LM_CONFIG_CURVE_WRITE;
+    } else {
+        config_mode = LM_CONFIG_CURVE_READ;
     }
+
+    // Build state: busy
+    setIntegerParam(profileBuildState_, PROFILE_BUILD_BUSY);
+    callParamCallbacks();
 
     while (true) {
         cycleEvent_.wait();
-        // new cycle
-        cycle_counter++;
-        if ((cycle_counter % 3000) == 0) {
-            printf("New cycle callback: %d\n", cycle_counter);
-        }
 
         t1 = epicsTime::getCurrent();
 
@@ -158,12 +153,16 @@ void LinmotController::curveAccessThread() {
         if (cfgValueIn_->read(&value_in) != asynSuccess)
             continue;
 
-        // Build state: busy
-        setIntegerParam(profileBuildState_, PROFILE_BUILD_BUSY);
-
         changed_mode = false;
 
         if (waiting_for_status) {
+            cycle_counter++;
+            if (cycle_counter >= LM_CYCLE_COUNT_TIMEOUT) {
+                setCurveBuildStatus("Curve access timeout", PROFILE_BUILD_DONE,
+                        PROFILE_STATUS_FAILURE);
+                break;
+            }
+
             if (status_word == next_mode_status) {
                 mode_state++;
                 changed_mode = true;
@@ -181,7 +180,7 @@ void LinmotController::curveAccessThread() {
                         ss << "Errored ";
                         ss << std::hex << error_code;
                         setCurveBuildStatus(ss.str(), PROFILE_BUILD_DONE, PROFILE_STATUS_FAILURE);
-                        goto cleanup;
+                        break;
                     }
                 }
                 continue;
@@ -190,16 +189,20 @@ void LinmotController::curveAccessThread() {
 
         if (buffer_response) {
             buffer[buffer_idx++] = value_in;
-            printf("Read value: %x\n", value_in);
         }
 
+#if DEBUG
+        if (buffer_response) {
+            printf("Read value: %x\n", value_in);
+        }
         printf("-- %d mode_state %x status_word %x value_in %x\n",
                 cycle_counter, mode_state, status_word, value_in);
+#endif
 
         if (changed_mode && mode_state >= LM_MODE_SETPOINTS) {
             if (!writing) {
                 buffer_idx--;
-
+#if DEBUG
                 if (buffer_response) {
                     printf("Buffer contents: \n");
                     for (int i=0; i <= buffer_idx; i++) {
@@ -207,24 +210,7 @@ void LinmotController::curveAccessThread() {
                     }
                     printf("\n");
                 }
-
-                if (mode_state == LM_MODE_SETPOINTS) {
-                    memcpy(curve_info, buffer, sizeof(LmCurveInfo));
-                    curve_info->dump();
-                }
-            }
-
-            if (mode_state == LM_MODE_SETPOINTS + 1) {
-                ss.str("");
-                ss.clear();
-                if (writing) {
-                    ss << "Wrote curve " << curve_id;
-                } else {
-                    ss << "Read curve " << curve_id;
-                }
-
-                setCurveBuildStatus(ss.str(), PROFILE_BUILD_DONE, PROFILE_STATUS_SUCCESS);
-                goto cleanup;
+#endif
             }
         }
 
@@ -287,20 +273,35 @@ void LinmotController::curveAccessThread() {
                         buffer[i] = (epicsInt32)(curve.setpoints[i] * LM_POSITION_SCALE);
                     }
                 } else {
+                    memcpy(curve_info, buffer, sizeof(LmCurveInfo));
+                    curve_info->dump();
                     setStringParam(profileBuildMessage_, "Reading positions");
                 }
             } else {
                 toggle = 1 - toggle;
             }
+            // TODO: setpoints directly to curve
 
             expected_status = 0x404 + toggle;
             next_mode_status = 0x004 + toggle;
             buffer_response = !writing;
             break;
 
+        case LM_MODE_FINISHED:
+            ss.str("");
+            ss.clear();
+            if (writing) {
+                ss << "Wrote curve " << curve_id;
+            } else {
+                ss << "Read curve " << curve_id;
+            }
+
+            setCurveBuildStatus(ss.str(), PROFILE_BUILD_DONE, PROFILE_STATUS_SUCCESS);
+            goto cleanup;
+
         default:
-            waiting_for_status = false;
-            buffer_response = false;
+            setCurveBuildStatus("Reached unknown state", PROFILE_BUILD_DONE,
+                    PROFILE_STATUS_FAILURE);
             continue;
         }
 
@@ -315,6 +316,7 @@ void LinmotController::curveAccessThread() {
         }
 
         waiting_for_status = true;
+        cycle_counter = 0;
 
         if (mode_state > 0) {
             next_control_word = ((config_mode + mode_state - 1) << 8) |
@@ -354,36 +356,49 @@ asynStatus LinmotController::buildProfile() {
     double time;
     int numPoints;
     int writeCurveId;
+    int buildState;
     LinmotAxis *axis = (LinmotAxis*)getAxis(0);
 
-    // TODO: if curve writing busy, fail...
+    st |= getIntegerParam(profileBuildState_, &buildState);
+
+    if (buildState == PROFILE_BUILD_BUSY) {
+        setStringParam(profileBuildMessage_, "Curve access busy");
+        return asynError;
+    }
+
     if (asynMotorController::buildProfile() != asynSuccess)
         return asynError;
 
     st |= getIntegerParam(profileTimeMode_, &timeMode);
     st |= getIntegerParam(profileNumPoints_, &numPoints);
-    st |= getIntegerParam(profileCurveId_, &writeCurveId);
     st |= getDoubleParam(profileFixedTime_, &time);
-    if (st) return asynError;
+    st |= getIntegerParam(profileCurveId_, &writeCurveId);
+    if (st) {
+        setStringParam(profileBuildMessage_, "Failed to get params");
+        return asynError;
+    }
 
     if (timeMode != PROFILE_TIME_MODE_FIXED) {
         setStringParam(profileBuildMessage_, "Fixed time mode only");
         goto fail;
     }
 
-    if (writeCurveId <= 0 || writeCurveId > 200) {
+    if (writeCurveId <= 0 || writeCurveId > LM_MAX_CURVE_ID) {
         setStringParam(profileBuildMessage_, "Invalid curve ID");
         goto fail;
     }
 
-    // TODO check numPoints
-    curveToWrite_.name = "buildCurve";
-    curveToWrite_.curve_id = writeCurveId;
-    curveToWrite_.setpoints.clear();
-    curveToWrite_.dt = time;
+    curve_.name = "buildCurve";
+    curve_.curve_id = writeCurveId;
+    curve_.setpoints.clear();
+    curve_.dt = time;
     for (int i=0; i < numPoints; i++) {
-        curveToWrite_.setpoints.push_back(axis->profilePositions_[i]);
+        curve_.setpoints.push_back(axis->profilePositions_[i]);
     }
+
+    writeCurve_ = true;
+    printf("Signalling write...\n");
+    curveAccessEvent_.signal();
     return asynSuccess;
 
 fail:

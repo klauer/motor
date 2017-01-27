@@ -12,6 +12,8 @@
 
 
 const double LM_MAX_CURVE_TIME = 42949.0; // 2**32/1e5;
+const int LM_CYCLE_COUNT_TIMEOUT = 100;
+const int LM_MAX_CURVE_ID = 200;
 
 
 enum LmObjectType {
@@ -69,6 +71,9 @@ const uint32_t LM_MODE_INIT = 0;
 const uint32_t LM_MODE_SEND_COMMAND = 1;
 const uint32_t LM_MODE_CURVE_INFO = 2;
 const uint32_t LM_MODE_SETPOINTS = 3;
+const uint32_t LM_MODE_FINISHED = 4;
+
+const uint32_t LM_MAX_PROFILE_POINTS = 5000; // TODO arbitrary restriction
 
 
 struct __attribute__((packed)) LmCurveInfo {

@@ -118,8 +118,10 @@ protected:
 
 private:
   int commandCount_;
+  LmPositionTimeCurve curve_;
+  epicsEvent curveAccessEvent_;
+  epicsMutex curveLock_;
   bool writeCurve_;
-  LmPositionTimeCurve curveToWrite_;
 
   asynStatus setCurveBuildStatus(const std::string& message,
                                  ProfileBuildState build_state=PROFILE_BUILD_DONE,
@@ -129,6 +131,7 @@ private:
   asynStatus setCurveBuildStatus(const char *message,
                                  ProfileBuildState=PROFILE_BUILD_DONE,
                                  ProfileStatus=PROFILE_STATUS_SUCCESS);
+  void curveAccess(LmPositionTimeCurve&, bool writing);
 friend class LinmotAxis;
 };
 
