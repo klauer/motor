@@ -116,13 +116,13 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
     int next_control_word = 0;
     int value_in;
 
-    epicsInt32 buffer[LM_MAX_PROFILE_POINTS + 2]; // TODO
+    epicsInt32 buffer[20]; // large enough to hold LmCurveInfo
     epicsInt32 *bptr = NULL;
+    double *ppos = NULL;
     std::stringstream ss;
 
     int buffer_idx = -1;
     int buffer_len = 0;
-    int i;
     int curve_id = curve.curve_id;
 
     int toggle = 0;
@@ -272,11 +272,8 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
 
                 if (writing) {
                     setStringParam(profileBuildMessage_, "Writing positions");
-                    bptr = &buffer[0];
+                    ppos = &curve.setpoints[0];
                     buffer_len = curve.setpoints.size();
-                    for (i=0; i < buffer_len; i++) {
-                        buffer[i] = (epicsInt32)(curve.setpoints[i] * LM_POSITION_SCALE);
-                    }
                 } else {
                     LmCurveInfo ci;
                     memcpy(&ci, buffer, sizeof(LmCurveInfo));
@@ -284,7 +281,7 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
                     curve.set_curve_info(ci);
                     setStringParam(profileBuildMessage_, "Reading positions");
                 }
-                buffer_response = reading;
+                buffer_response = false;
             } else {
                 toggle = 1 - toggle;
                 curve.setpoints.push_back((double)(value_in) / LM_POSITION_SCALE);
@@ -313,13 +310,18 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
             continue;
         }
 
-        if (writing && (mode_state == LM_MODE_CURVE_INFO || mode_state == LM_MODE_SETPOINTS)) {
-            cfgValueOut_->write(*bptr);
-            buffer_len--;
-            if (buffer_len < 0) {
-                printf("  buffer empty (%d)?\n", buffer_len);
-            } else {
-                bptr++;
+        if (writing) {
+            if (mode_state == LM_MODE_CURVE_INFO) {
+                cfgValueOut_->write(*bptr);
+                buffer_len--;
+                if (buffer_len >= 0) {
+                    bptr++;
+                }
+            } else if (mode_state == LM_MODE_SETPOINTS) {
+                cfgValueOut_->write((epicsInt32)(*ppos * LM_POSITION_SCALE));
+                if (buffer_len >= 0) {
+                    ppos++;
+                }
             }
         }
 
