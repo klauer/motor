@@ -367,9 +367,9 @@ cleanup:
             num_points = LM_MAX_PROFILE_POINTS;
 
         for (j=0; j < num_points; j++) {
-// #if DEBUG
+#if DEBUG
             printf("curve.setpoints[%d] = %f\n", j, curve.setpoints[j]);
-// #endif
+#endif
             axis->profilePositions_[j] = curve.setpoints[j];
         }
         doCallbacksFloat64Array(axis->profilePositions_, num_points, profilePositions_, 0);

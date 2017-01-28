@@ -138,6 +138,3 @@ private:
   void curveAccess(LmPositionTimeCurve&, bool writing);
 friend class LinmotAxis;
 };
-
-
-static void CurveThreadC(void *drvPvt);

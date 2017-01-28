@@ -210,6 +210,7 @@ struct digitalInputsWord {
 std::vector<epicsEvent*> LinmotController::cycleEventVector_;
 bool LinmotController::cycleCallbackRegistered_ = false;
 static const char *driverName = "LinmotMotorDriver";
+static void CurveThreadC(void *drvPvt);
 
 /** Creates a new LinmotController object.
   * \param[in] portName          The name of the asyn port that will be created for this driver
@@ -332,7 +333,6 @@ asynStatus LinmotController::writeInt32(asynUser *pasynUser, epicsInt32 value)
     int function = pasynUser->reason;
     asynStatus status=asynSuccess;
     asynMotorAxis *pAxis;
-    int axis;
     static const char *functionName = "writeInt32";
 
     pAxis = getAxis(pasynUser);
