@@ -103,6 +103,9 @@ void LinmotController::curveAccessThread() {
 }
 
 
+// #undef DEBUG
+// #define DEBUG 1
+
 void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
     int cycle_counter = 0;
 
@@ -129,6 +132,8 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
     bool waiting_for_status = false;
     bool buffer_response = false;
     bool changed_mode = false;
+    const bool reading = !writing;
+
     LmCurveInfo *curve_info = curve.get_curve_info();
     epicsTime t1, t2;
 
@@ -136,6 +141,10 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
         config_mode = LM_CONFIG_CURVE_WRITE;
     } else {
         config_mode = LM_CONFIG_CURVE_READ;
+        curve.name = "";
+        curve.curve_id = 0;
+        curve.setpoints.clear();
+        curve.dt = 0.0;
     }
 
     // Build state: busy
@@ -204,21 +213,6 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
                 cycle_counter, mode_state, status_word, value_in);
 #endif
 
-        if (changed_mode && mode_state >= LM_MODE_SETPOINTS) {
-            if (!writing) {
-                buffer_idx--;
-#if DEBUG
-                if (buffer_response) {
-                    printf("Buffer contents: \n");
-                    for (int i=0; i <= buffer_idx; i++) {
-                        printf("%x ", buffer[i]);
-                    }
-                    printf("\n");
-                }
-#endif
-            }
-        }
-
         switch (mode_state) {
         case LM_MODE_INIT:
             next_control_word = LM_CONFIG_INIT;
@@ -240,6 +234,10 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
                 cfgValueOut_->write(curve_info->packed_block_size());
             } else {
                 cfgValueOut_->write(0x0);
+                ss.str("");
+                ss.clear();
+                ss << "Reading curve " << curve_id;
+                setCurveBuildStatus(ss.str(), PROFILE_BUILD_BUSY);
             }
 
             toggle = 1;
@@ -264,7 +262,7 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
             toggle = 1 - toggle;
             expected_status = 0x402 + toggle;
             next_mode_status = 0x002 + toggle;
-            buffer_response = !writing;
+            buffer_response = reading;
             break;
 
         case LM_MODE_SETPOINTS:
@@ -280,27 +278,30 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
                         buffer[i] = (epicsInt32)(curve.setpoints[i] * LM_POSITION_SCALE);
                     }
                 } else {
-                    memcpy(curve_info, buffer, sizeof(LmCurveInfo));
-                    curve_info->dump();
+                    LmCurveInfo ci;
+                    memcpy(&ci, buffer, sizeof(LmCurveInfo));
+                    ci.dump();
+                    curve.set_curve_info(ci);
                     setStringParam(profileBuildMessage_, "Reading positions");
                 }
+                buffer_response = reading;
             } else {
                 toggle = 1 - toggle;
+                curve.setpoints.push_back((double)(value_in) / LM_POSITION_SCALE);
             }
-            // TODO: setpoints directly to curve
 
             expected_status = 0x404 + toggle;
             next_mode_status = 0x004 + toggle;
-            buffer_response = !writing;
             break;
 
         case LM_MODE_FINISHED:
             ss.str("");
             ss.clear();
             if (writing) {
-                ss << "Wrote curve " << curve_id;
+                ss << "Wrote curve " << curve_id << " " << curve_info->name;
             } else {
                 ss << "Read curve " << curve_id;
+                curve.setpoints.push_back((double)(value_in) / LM_POSITION_SCALE);
             }
 
             setCurveBuildStatus(ss.str(), PROFILE_BUILD_DONE, PROFILE_STATUS_SUCCESS);
@@ -352,10 +353,62 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
 cleanup:
     if (curve_info) {
         delete curve_info;
+        curve_info = NULL;
+    }
+
+    if (reading) {
+        setStringParam(profileName_, curve.name.c_str());
+        setIntegerParam(profileCurveId_, curve.curve_id);
+        LinmotAxis *axis = (LinmotAxis*)getAxis(0);
+        unsigned int num_points = curve.setpoints.size();
+        unsigned int j;
+
+        if (num_points > LM_MAX_PROFILE_POINTS)
+            num_points = LM_MAX_PROFILE_POINTS;
+
+        for (j=0; j < num_points; j++) {
+// #if DEBUG
+            printf("curve.setpoints[%d] = %f\n", j, curve.setpoints[j]);
+// #endif
+            axis->profilePositions_[j] = curve.setpoints[j];
+        }
+        doCallbacksFloat64Array(axis->profilePositions_, num_points, profilePositions_, 0);
+        setIntegerParam(profileNumPoints_, num_points);
+        setDoubleParam(profileFixedTime_, curve.dt);
+#if DEBUG
+        printf("read curve back:\n");
+        printf("dt is %f\n", curve.dt);
+        printf("curve name is %s\n", curve.name.c_str());
+        printf("num points is %d\n", num_points);
+#endif
+        setIntegerParam(profileRead_, 0);
     }
     callParamCallbacks();
 }
 
+asynStatus LinmotController::readCurve() {
+    int st = 0;
+    int curveId;
+    int buildState;
+
+    st |= getIntegerParam(profileBuildState_, &buildState);
+
+    if (buildState == PROFILE_BUILD_BUSY) {
+        setStringParam(profileBuildMessage_, "Curve access busy");
+        return asynError;
+    }
+
+    st |= getIntegerParam(profileCurveId_, &curveId);
+    if (st) {
+        setStringParam(profileBuildMessage_, "Failed to get curve id");
+        return asynError;
+    }
+
+    writeCurve_ = false;
+    curve_.curve_id = curveId;
+    curveAccessEvent_.signal();
+    return asynSuccess;
+}
 
 asynStatus LinmotController::buildProfile() {
     int st = 0;
@@ -364,6 +417,8 @@ asynStatus LinmotController::buildProfile() {
     int numPoints;
     int writeCurveId;
     int buildState;
+    char name[LM_CI_STRING_LENGTH + 1];
+
     LinmotAxis *axis = (LinmotAxis*)getAxis(0);
 
     st |= getIntegerParam(profileBuildState_, &buildState);
@@ -395,12 +450,17 @@ asynStatus LinmotController::buildProfile() {
         goto fail;
     }
 
-    curve_.name = "buildCurve";
+    if (getStringParam(profileName_, LM_CI_STRING_LENGTH, (char *)name) || !name[0]) {
+        strcpy(name, "IocCurve");
+    }
+
+    curve_.name = name;
     curve_.curve_id = writeCurveId;
     curve_.setpoints.clear();
     curve_.dt = time;
     for (int i=0; i < numPoints; i++) {
         curve_.setpoints.push_back(axis->profilePositions_[i]);
+        printf("Setpoint[%d] = %f\n", i, axis->profilePositions_[i]);
     }
 
     writeCurve_ = true;

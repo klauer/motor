@@ -58,6 +58,8 @@ March 4, 2011
 
 // Linmot-specific parameters defined here
 #define profileCurveIdString    "PROFILE_CURVE_ID"
+#define profileNameString       "PROFILE_NAME"
+#define profileReadString       "PROFILE_READ"
 
 /** State Var */
 /**
@@ -266,6 +268,8 @@ try
     digitalInputsWord_ = new asynInt32Client(LinmotPortName, 0, digitalInputsWordString);
 
     createParam(profileCurveIdString, asynParamInt32, &profileCurveId_);
+    createParam(profileNameString, asynParamOctet, &profileName_);
+    createParam(profileReadString, asynParamInt32, &profileRead_);
 }
   catch (...) {
 //error
@@ -322,6 +326,40 @@ static void CurveThreadC(void *drvPvt)
     LinmotController *pController = (LinmotController*)drvPvt;
     pController->curveAccessThread();
 }
+
+asynStatus LinmotController::writeInt32(asynUser *pasynUser, epicsInt32 value)
+{
+    int function = pasynUser->reason;
+    asynStatus status=asynSuccess;
+    asynMotorAxis *pAxis;
+    int axis;
+    static const char *functionName = "writeInt32";
+
+    pAxis = getAxis(pasynUser);
+    if (!pAxis) return asynError;
+
+    /* Set the parameter and readback in the parameter library. */
+    pAxis->setIntegerParam(function, value);
+
+    if (function == profileRead_) {
+        status = readCurve();
+    } else {
+        return asynMotorController::writeInt32(pasynUser, value);
+    }
+
+    /* Do callbacks so higher layers see any changes */
+    pAxis->callParamCallbacks();
+    if (status)
+        asynPrint(pasynUser, ASYN_TRACE_ERROR,
+          "%s:%s error, status=%d function=%d, value=%d\n",
+          driverName, functionName, status, function, value);
+    else
+        asynPrint(pasynUser, ASYN_TRACEIO_DRIVER,
+          "%s:%s:: function=%d, value=%d\n",
+          driverName, functionName, function, value);
+    return status;
+}
+
 
 /** Creates a new LinmotController object.
   * Configuration command, called directly or from iocsh
