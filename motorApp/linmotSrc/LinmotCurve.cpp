@@ -116,12 +116,11 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
     int next_control_word = 0;
     int value_in;
 
-    epicsInt32 buffer[20]; // large enough to hold LmCurveInfo
+    epicsInt32 buffer[sizeof(LmCurveInfo) >> 2]; // large enough to hold LmCurveInfo
     epicsInt32 *bptr = NULL;
     double *ppos = NULL;
     std::stringstream ss;
 
-    int buffer_idx = -1;
     int buffer_len = 0;
     int curve_id = curve.curve_id;
 
@@ -202,7 +201,15 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
         }
 
         if (buffer_response) {
-            buffer[buffer_idx++] = value_in;
+            if (buffer_len > 0) {
+                *bptr = value_in;
+                bptr++;
+                buffer_len--;
+            } else {
+                setCurveBuildStatus("Unexpected response size",
+                        PROFILE_BUILD_DONE, PROFILE_STATUS_FAILURE);
+                goto cleanup;
+            }
         }
 
 #if DEBUG
@@ -241,7 +248,8 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
             }
 
             toggle = 1;
-            buffer_idx = 0;
+            bptr = buffer;
+            buffer_len = sizeof(buffer);
             break;
 
         case LM_MODE_CURVE_INFO:
@@ -268,8 +276,6 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
         case LM_MODE_SETPOINTS:
             if (changed_mode) {
                 toggle = 0;
-                buffer_idx = 0;
-
                 if (writing) {
                     setStringParam(profileBuildMessage_, "Writing positions");
                     ppos = &curve.setpoints[0];
@@ -338,9 +344,6 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
 #if DEBUG
         printf("  toggle %x\n", toggle);
         printf("  buffer_response %x\n", buffer_response);
-        if (buffer_response) {
-            printf("  buffer_idx %x\n", buffer_idx);
-        }
         printf("  expected_status %x\n", expected_status);
         printf("  next_mode_status %x\n", next_mode_status);
         printf("  wrote control_word %x\n", next_control_word);
@@ -350,12 +353,6 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
         printf("  dt %f\n", 1000.0 * (epicsTime::getCurrent() - t1));
 #endif
         callParamCallbacks();
-    }
-
-cleanup:
-    if (curve_info) {
-        delete curve_info;
-        curve_info = NULL;
     }
 
     if (reading) {
@@ -385,6 +382,13 @@ cleanup:
 #endif
         setIntegerParam(profileRead_, 0);
     }
+
+cleanup:
+    if (curve_info) {
+        delete curve_info;
+        curve_info = NULL;
+    }
+
     callParamCallbacks();
 }
 
