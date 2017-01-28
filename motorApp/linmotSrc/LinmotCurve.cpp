@@ -308,12 +308,17 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
             }
 
             setCurveBuildStatus(ss.str(), PROFILE_BUILD_DONE, PROFILE_STATUS_SUCCESS);
-            goto cleanup;
+            break;
 
         default:
             setCurveBuildStatus("Reached unknown state", PROFILE_BUILD_DONE,
                     PROFILE_STATUS_FAILURE);
-            continue;
+            goto cleanup;
+        }
+
+        if (mode_state == LM_MODE_FINISHED) {
+            // finally done
+            break;
         }
 
         if (writing) {
@@ -356,20 +361,46 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
     }
 
     if (reading) {
-        setStringParam(profileName_, curve.name.c_str());
-        setIntegerParam(profileCurveId_, curve.curve_id);
+        // TODO move this block to virtual method
         LinmotAxis *axis = (LinmotAxis*)getAxis(0);
         unsigned int num_points = curve.setpoints.size();
         unsigned int j;
 
+        double resolution = 1.0;
+        double offset = 0.0;
+        int direction = 0;
+        int st;
+
+        setStringParam(profileName_, curve.name.c_str());
+        setIntegerParam(profileCurveId_, curve.curve_id);
+
+        st = getDoubleParam(axis->axisNo_, profileMotorResolution_, &resolution);
+        st |= getDoubleParam(axis->axisNo_, profileMotorOffset_, &offset);
+        st |= getIntegerParam(axis->axisNo_, profileMotorDirection_, &direction);
+
         if (num_points > LM_MAX_PROFILE_POINTS)
             num_points = LM_MAX_PROFILE_POINTS;
+
+        printf("[st=%d] Resolution %f offset %f direction %d\n", st,
+                resolution, offset, direction);
+        if (resolution == 0.0) {
+            resolution = 1.0;
+        }
+
+        if (st) {
+            resolution = 1.0;
+            offset = 0.5;
+        }
+
+        if (direction != 0) {
+            resolution = -resolution;
+        }
 
         for (j=0; j < num_points; j++) {
 #if DEBUG
             printf("curve.setpoints[%d] = %f\n", j, curve.setpoints[j]);
 #endif
-            axis->profilePositions_[j] = curve.setpoints[j];
+            axis->profilePositions_[j] = resolution * curve.setpoints[j] + offset;
         }
         doCallbacksFloat64Array(axis->profilePositions_, num_points, profilePositions_, 0);
         setIntegerParam(profileNumPoints_, num_points);
