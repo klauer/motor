@@ -157,6 +157,7 @@ void LinmotController::curveReadBack(LmPositionTimeCurve &curve) {
     printf("num points is %d\n", num_points);
 #endif
     setIntegerParam(profileRead_, 0);
+    callParamCallbacks();
 }
 
 void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
