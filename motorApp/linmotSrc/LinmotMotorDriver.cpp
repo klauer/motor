@@ -299,6 +299,9 @@ unlock();
   initializeProfile(maxProfilePoints_);
 
   setCurveBuildStatus("Ready", PROFILE_BUILD_DONE, PROFILE_STATUS_SUCCESS);
+  setIntegerParam(profileCurveId_, 1);
+  setStringParam(profileName_, "");
+  setIntegerParam(profileRead_, 0);
   startPoller(movingPollPeriod, idlePollPeriod, 2);
 }
 
