@@ -120,6 +120,9 @@ protected:
   static void sCycleCallback(void *, asynUser *, epicsInt32 data);
   static std::vector<epicsEvent*> cycleEventVector_;
 
+  // Curve access
+  virtual void curveReadBack(LmPositionTimeCurve &curve);
+
 private:
   int commandCount_;
   LmPositionTimeCurve curve_;

@@ -106,6 +106,59 @@ void LinmotController::curveAccessThread() {
 // #undef DEBUG
 // #define DEBUG 1
 
+void LinmotController::curveReadBack(LmPositionTimeCurve &curve) {
+    LinmotAxis *axis = (LinmotAxis*)getAxis(0);
+    unsigned int num_points = curve.setpoints.size();
+    unsigned int j;
+
+    double resolution = 1.0;
+    double offset = 0.0;
+    int direction = 0;
+    int st;
+
+    setStringParam(profileName_, curve.name.c_str());
+    setIntegerParam(profileCurveId_, curve.curve_id);
+
+    st = getDoubleParam(axis->axisNo_, profileMotorResolution_, &resolution);
+    st |= getDoubleParam(axis->axisNo_, profileMotorOffset_, &offset);
+    st |= getIntegerParam(axis->axisNo_, profileMotorDirection_, &direction);
+
+    if (num_points > LM_MAX_PROFILE_POINTS)
+        num_points = LM_MAX_PROFILE_POINTS;
+
+    printf("[st=%d] Resolution %f offset %f direction %d\n", st,
+            resolution, offset, direction);
+    if (resolution == 0.0) {
+        resolution = 1.0;
+    }
+
+    if (st) {
+        resolution = 1.0;
+        offset = 0.5;
+    }
+
+    if (direction != 0) {
+        resolution = -resolution;
+    }
+
+    for (j=0; j < num_points; j++) {
+#if DEBUG
+        printf("curve.setpoints[%d] = %f\n", j, curve.setpoints[j]);
+#endif
+        axis->profilePositions_[j] = resolution * curve.setpoints[j] + offset;
+    }
+    doCallbacksFloat64Array(axis->profilePositions_, num_points, profilePositions_, 0);
+    setIntegerParam(profileNumPoints_, num_points);
+    setDoubleParam(profileFixedTime_, curve.dt);
+#if DEBUG
+    printf("read curve back:\n");
+    printf("dt is %f\n", curve.dt);
+    printf("curve name is %s\n", curve.name.c_str());
+    printf("num points is %d\n", num_points);
+#endif
+    setIntegerParam(profileRead_, 0);
+}
+
 void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
     int cycle_counter = 0;
 
@@ -305,6 +358,7 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
             } else {
                 ss << "Read curve " << curve_id;
                 curve.setpoints.push_back((double)(value_in) / LM_POSITION_SCALE);
+                curveReadBack(curve);
             }
 
             setCurveBuildStatus(ss.str(), PROFILE_BUILD_DONE, PROFILE_STATUS_SUCCESS);
@@ -358,60 +412,6 @@ void LinmotController::curveAccess(LmPositionTimeCurve &curve, bool writing) {
         printf("  dt %f\n", 1000.0 * (epicsTime::getCurrent() - t1));
 #endif
         callParamCallbacks();
-    }
-
-    if (reading) {
-        // TODO move this block to virtual method
-        LinmotAxis *axis = (LinmotAxis*)getAxis(0);
-        unsigned int num_points = curve.setpoints.size();
-        unsigned int j;
-
-        double resolution = 1.0;
-        double offset = 0.0;
-        int direction = 0;
-        int st;
-
-        setStringParam(profileName_, curve.name.c_str());
-        setIntegerParam(profileCurveId_, curve.curve_id);
-
-        st = getDoubleParam(axis->axisNo_, profileMotorResolution_, &resolution);
-        st |= getDoubleParam(axis->axisNo_, profileMotorOffset_, &offset);
-        st |= getIntegerParam(axis->axisNo_, profileMotorDirection_, &direction);
-
-        if (num_points > LM_MAX_PROFILE_POINTS)
-            num_points = LM_MAX_PROFILE_POINTS;
-
-        printf("[st=%d] Resolution %f offset %f direction %d\n", st,
-                resolution, offset, direction);
-        if (resolution == 0.0) {
-            resolution = 1.0;
-        }
-
-        if (st) {
-            resolution = 1.0;
-            offset = 0.5;
-        }
-
-        if (direction != 0) {
-            resolution = -resolution;
-        }
-
-        for (j=0; j < num_points; j++) {
-#if DEBUG
-            printf("curve.setpoints[%d] = %f\n", j, curve.setpoints[j]);
-#endif
-            axis->profilePositions_[j] = resolution * curve.setpoints[j] + offset;
-        }
-        doCallbacksFloat64Array(axis->profilePositions_, num_points, profilePositions_, 0);
-        setIntegerParam(profileNumPoints_, num_points);
-        setDoubleParam(profileFixedTime_, curve.dt);
-#if DEBUG
-        printf("read curve back:\n");
-        printf("dt is %f\n", curve.dt);
-        printf("curve name is %s\n", curve.name.c_str());
-        printf("num points is %d\n", num_points);
-#endif
-        setIntegerParam(profileRead_, 0);
     }
 
 cleanup:
