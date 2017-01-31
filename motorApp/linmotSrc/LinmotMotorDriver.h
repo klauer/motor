@@ -68,15 +68,17 @@ public:
   LinmotAxis* getAxis(asynUser *pasynUser);
   LinmotAxis* getAxis(int axisNo);
 
-
   /* These are the methods that are new to this class */
   asynStatus readBinaryIO();
-  void curveAccessThread();  // This should be private but is called from C function
   asynStatus sendCmd( int command, int param1 = 0, int param2 = 0, int param3 = 0, int param4 = 0, int param5 = 0);
   virtual asynStatus writeInt32(asynUser *pasynUser, epicsInt32 value);
 
   // Curve-related
+  asynStatus runCurveTotal(epicsUInt16 curveId, double time_sec,
+      double amplitude_scale=1.0, double offset=0.0);
+  void curveAccessThread();  // This should be private but is called from C function
   virtual asynStatus buildProfile();
+  virtual asynStatus executeProfile();
   asynStatus deleteCurve(epicsUInt16 curve_id);
   asynStatus readCurve();
 
@@ -110,8 +112,13 @@ protected:
   epicsInt32 profileCurveId_;
   epicsInt32 profileName_;
   epicsInt32 profileRead_;
+  epicsInt32 profileRunMode_;
+  epicsInt32 profileAmplitudeScale_;
+  epicsInt32 profileOffset_;
+  epicsInt32 profileTimeScale_;
+  epicsInt32 profileTimeTotal_;
 #define LIN_FIRST_PARAM profileCurveId_
-#define LIN_LAST_PARAM profileRead_
+#define LIN_LAST_PARAM profileTimeTotal_
 #define NUM_Linmot_PARAMS (&LIN_LAST_PARAM - &LIN_FIRST_PARAM + 1)
 
   // For communicating in sync with ethercat bus cycles:

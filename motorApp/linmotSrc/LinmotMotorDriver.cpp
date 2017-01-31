@@ -60,6 +60,11 @@ March 4, 2011
 #define profileCurveIdString    "PROFILE_CURVE_ID"
 #define profileNameString       "PROFILE_NAME"
 #define profileReadString       "PROFILE_READ"
+#define profileRunModeString    "PROFILE_RUN_MODE"
+#define profileAmpScaleString   "PROFILE_AMP_SCALE"
+#define profileOffsetString     "PROFILE_OFFSET"
+#define profileTimeScaleString  "PROFILE_TIME_SCALE"
+#define profileTimeTotalString  "PROFILE_TIME_TOTAL"
 
 /** State Var */
 /**
@@ -271,6 +276,12 @@ try
     createParam(profileCurveIdString, asynParamInt32, &profileCurveId_);
     createParam(profileNameString, asynParamOctet, &profileName_);
     createParam(profileReadString, asynParamInt32, &profileRead_);
+
+    createParam(profileRunModeString, asynParamInt32, &profileRunMode_);
+    createParam(profileAmpScaleString, asynParamInt32, &profileAmplitudeScale_);
+    createParam(profileOffsetString, asynParamInt32, &profileOffset_);
+    createParam(profileTimeScaleString, asynParamInt32, &profileTimeScale_);
+    createParam(profileTimeTotalString, asynParamInt32, &profileTimeTotal_);
 }
   catch (...) {
 //error
@@ -302,6 +313,11 @@ unlock();
   setIntegerParam(profileCurveId_, 1);
   setStringParam(profileName_, "");
   setIntegerParam(profileRead_, 0);
+  setIntegerParam(profileRunMode_, LM_PROFILE_MODE_SCALED);
+  setDoubleParam(profileAmplitudeScale_, 1.0);
+  setDoubleParam(profileOffset_, 0.0);
+  setDoubleParam(profileTimeScale_, 1.0);
+  setDoubleParam(profileTimeTotal_, 1.0);
   startPoller(movingPollPeriod, idlePollPeriod, 2);
 }
 

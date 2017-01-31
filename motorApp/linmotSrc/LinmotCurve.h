@@ -12,6 +12,8 @@
 
 
 const double LM_MAX_CURVE_TIME = 42949.0; // 2**32/1e5;
+const double LM_MAX_POSITION = 214748.0; // 2**31/1e4;
+const double LM_MIN_POSITION = -LM_MAX_POSITION;
 const int LM_CYCLE_COUNT_TIMEOUT = 100;
 const int LM_MAX_CURVE_ID = 200;
 
@@ -44,6 +46,11 @@ enum LmCommandHeader {
     LM_HDR_TIME_CURVE_SCALED=0x0440,
     LM_HDR_TIME_CURVE_TOTAL=0x0450,
     LM_HDR_INVALIDATE_CURVE=0x0500
+};
+
+enum LmProfileMode{
+  LM_PROFILE_MODE_SCALED,
+  LM_PROFILE_MODE_TOTAL
 };
 
 

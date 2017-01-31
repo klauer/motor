@@ -527,6 +527,91 @@ asynStatus LinmotController::setCurveBuildStatus(const char *message,
 }
 
 
+asynStatus LinmotController::runCurveTotal(epicsUInt16 curve_id,
+    double time_sec,
+    double amplitude_scale,
+    double offset
+    )
+{
+    int st = 0;
+    int buildState;
+
+    st |= getIntegerParam(profileBuildState_, &buildState);
+
+    if (st || buildState == PROFILE_BUILD_BUSY) {
+        setStringParam(profileExecuteMessage_, "Curve access busy");
+        return asynError;
+    }
+
+    if (curve_id <= 0 || curve_id > LM_MAX_CURVE_ID) {
+        setStringParam(profileExecuteMessage_, "Invalid curve ID");
+        return asynError;
+    }
+
+    if (time_sec <= 0.0 || time_sec >= LM_MAX_CURVE_TIME) {
+        setStringParam(profileExecuteMessage_, "Bad total time");
+        return asynError;
+    }
+
+    // Create records, set LOPR/HOPR
+    if (amplitude_scale < -20.0 || amplitude_scale > 20.0) {
+        setStringParam(profileExecuteMessage_, "Bad amplitude scale [-20, 20]");
+        return asynError;
+    }
+
+    if (offset < LM_MIN_POSITION || offset > LM_MAX_POSITION) {
+        setStringParam(profileExecuteMessage_, "Bad position offset");
+        return asynError;
+    }
+
+
+    LmTimeCurveTotal tc;
+    tc.curve_id = curve_id;
+    tc.curve_offset = (int32_t)(offset * LM_POSITION_SCALE);
+    tc.time = (int32_t)(time_sec * LM_CI_XLENGTH_SCALE);
+    tc.amplitude_scale = (int16_t)(amplitude_scale * 1.0e3);
+
+    epicsInt32 *buf = (epicsInt32 *)&tc;
+    return sendCmd(LM_HDR_TIME_CURVE_TOTAL,
+            *buf,
+            *(buf + 1),
+            *(buf + 2)
+            );
+}
+
+
+asynStatus LinmotController::executeProfile()
+{
+    int st = 0;
+    int curveId = 0;
+    int runMode = 0;
+    double ampScale = 0.0;
+    double offset = 0.0;
+
+    st = getIntegerParam(profileCurveId_, &curveId);
+    st |= getIntegerParam(profileRunMode_, &runMode);
+    st |= getDoubleParam(profileAmplitudeScale_, &ampScale);
+    st |= getDoubleParam(profileOffset_, &offset);
+
+    if (runMode == LM_PROFILE_MODE_SCALED) {
+        double timeScale = 0.0;
+        st |= getDoubleParam(profileTimeScale_, &timeScale);
+        if (st)
+            return asynError;
+        // return runCurveScaled(curve_id, timeTotal, ampScale, offset);
+        return asynSuccess;
+    }
+
+    double timeTotal = 0.0;
+    st |= getDoubleParam(profileTimeTotal_, &timeTotal);
+
+    if (st)
+        return asynError;
+
+    return runCurveTotal(curveId, timeTotal, ampScale, offset);
+}
+
+
 int __curve_test(void)
 {
     // assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
