@@ -6,6 +6,10 @@
 #include <iomanip>
 
 
+// TODO: duplicated
+static const char *driverName = "LinmotMotorDriver";
+
+
 bool LmCurveInfo::set_name(const char* new_name) {
     if (!new_name || strlen((char *)new_name) >= LM_CI_STRING_LENGTH)
         return false;
@@ -107,6 +111,7 @@ void LinmotController::curveAccessThread() {
 // #define DEBUG 1
 
 void LinmotController::curveReadBack(LmPositionTimeCurve &curve) {
+    static const char *functionName = "curveReadBack";
     LinmotAxis *axis = (LinmotAxis*)getAxis(0);
     unsigned int num_points = curve.setpoints.size();
     unsigned int j;
@@ -126,8 +131,10 @@ void LinmotController::curveReadBack(LmPositionTimeCurve &curve) {
     if (num_points > LM_MAX_PROFILE_POINTS)
         num_points = LM_MAX_PROFILE_POINTS;
 
-    printf("[st=%d] Resolution %f offset %f direction %d\n", st,
-            resolution, offset, direction);
+    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+             "%s:%s [st=%d] Resolution %f offset %f direction %d\n",
+             driverName, functionName, st, resolution, offset, direction);
+
     if (resolution == 0.0) {
         resolution = 1.0;
     }
@@ -142,20 +149,37 @@ void LinmotController::curveReadBack(LmPositionTimeCurve &curve) {
     }
 
     for (j=0; j < num_points; j++) {
-#if DEBUG
-        printf("curve.setpoints[%d] = %f\n", j, curve.setpoints[j]);
-#endif
+        asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+                 "%s:%s curve.setpoints[%d] = %f\n",
+                 driverName, functionName,
+                 j, curve.setpoints[j]);
+
         axis->profilePositions_[j] = resolution * curve.setpoints[j] + offset;
     }
     doCallbacksFloat64Array(axis->profilePositions_, num_points, profilePositions_, 0);
     setIntegerParam(profileNumPoints_, num_points);
     setDoubleParam(profileFixedTime_, curve.dt);
-#if DEBUG
-    printf("read curve back:\n");
-    printf("dt is %f\n", curve.dt);
-    printf("curve name is %s\n", curve.name.c_str());
-    printf("num points is %d\n", num_points);
-#endif
+
+    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+              "%s:%s read curve back:\n",
+              driverName, functionName
+              );
+
+    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+              "%s:%s dt is %f\n",
+              driverName, functionName,
+              curve.dt);
+
+    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+              "%s:%s curve name is %s\n",
+              driverName, functionName,
+              curve.name.c_str());
+
+    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+              "%s:%s num points is %d\n",
+              driverName, functionName,
+              num_points);
+
     setIntegerParam(profileRead_, 0);
     callParamCallbacks();
 }
@@ -449,6 +473,7 @@ asynStatus LinmotController::readCurve() {
 }
 
 asynStatus LinmotController::buildProfile() {
+    static const char *functionName = "buildProfile";
     int st = 0;
     int timeMode;
     double time;
@@ -498,7 +523,10 @@ asynStatus LinmotController::buildProfile() {
     curve_.dt = time;
     for (int i=0; i < numPoints; i++) {
         curve_.setpoints.push_back(axis->profilePositions_[i]);
-        printf("Setpoint[%d] = %f\n", i, axis->profilePositions_[i]);
+        asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+                  "%s:%s Setpoint[%d] = %f\n",
+                  driverName, functionName,
+                  i, axis->profilePositions_[i]);
     }
 
     writeCurve_ = true;
@@ -529,6 +557,7 @@ asynStatus LinmotController::setCurveBuildStatus(const char *message,
 asynStatus LinmotController::runCurveScaled(epicsUInt16 curve_id,
     double time_scale, double amplitude_scale, double offset)
 {
+    static const char *functionName = "runCurveScaled";
     int st = 0;
     int buildState;
 
@@ -559,8 +588,10 @@ asynStatus LinmotController::runCurveScaled(epicsUInt16 curve_id,
         return asynError;
     }
 
-    printf("Running curve %d (time_scale=%g amp_scale=%g offset=%g)\n",
-           curve_id, time_scale, amplitude_scale, offset);
+    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+              "%s:%s Running curve %d (time_scale=%g amp_scale=%g offset=%g)\n",
+              driverName, functionName,
+              curve_id, time_scale, amplitude_scale, offset);
 
     LmTimeCurveScaled tc;
     tc.curve_id = curve_id;
@@ -585,6 +616,7 @@ asynStatus LinmotController::runCurveTotal(epicsUInt16 curve_id,
     double offset
     )
 {
+    static const char *functionName = "runCurveTotal";
     int st = 0;
     int buildState;
 
@@ -615,8 +647,10 @@ asynStatus LinmotController::runCurveTotal(epicsUInt16 curve_id,
         return asynError;
     }
 
-    printf("Running curve %d (time_sec=%g amp_scale=%g offset=%g)\n",
-            curve_id, time_sec, amplitude_scale, offset);
+    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+              "%s:%s Running curve %d (time_sec=%g amp_scale=%g offset=%g)\n",
+              driverName, functionName,
+              curve_id, time_sec, amplitude_scale, offset);
 
     LmTimeCurveTotal tc;
     tc.curve_id = curve_id;
