@@ -278,10 +278,10 @@ try
     createParam(profileReadString, asynParamInt32, &profileRead_);
 
     createParam(profileRunModeString, asynParamInt32, &profileRunMode_);
-    createParam(profileAmpScaleString, asynParamInt32, &profileAmplitudeScale_);
-    createParam(profileOffsetString, asynParamInt32, &profileOffset_);
-    createParam(profileTimeScaleString, asynParamInt32, &profileTimeScale_);
-    createParam(profileTimeTotalString, asynParamInt32, &profileTimeTotal_);
+    createParam(profileAmpScaleString, asynParamFloat64, &profileAmplitudeScale_);
+    createParam(profileOffsetString, asynParamFloat64, &profileOffset_);
+    createParam(profileTimeScaleString, asynParamFloat64, &profileTimeScale_);
+    createParam(profileTimeTotalString, asynParamFloat64, &profileTimeTotal_);
 }
   catch (...) {
 //error

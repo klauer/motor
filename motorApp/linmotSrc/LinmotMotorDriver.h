@@ -74,6 +74,8 @@ public:
   virtual asynStatus writeInt32(asynUser *pasynUser, epicsInt32 value);
 
   // Curve-related
+  asynStatus runCurveScaled(epicsUInt16 curveId, double time_scale,
+      double amplitude_scale=1.0, double offset=0.0);
   asynStatus runCurveTotal(epicsUInt16 curveId, double time_sec,
       double amplitude_scale=1.0, double offset=0.0);
   void curveAccessThread();  // This should be private but is called from C function

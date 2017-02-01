@@ -526,6 +526,14 @@ asynStatus LinmotController::setCurveBuildStatus(const char *message,
         return asynSuccess;
 }
 
+asynStatus LinmotController::runCurveScaled(epicsUInt16 curve_id,
+    double time_scale, double amplitude_scale, double offset)
+{
+    printf("Running curve %d (time_scale=%g amp_scale=%g offset=%g)\n",
+           curve_id, time_scale, amplitude_scale, offset);
+
+    return asynSuccess;
+}
 
 asynStatus LinmotController::runCurveTotal(epicsUInt16 curve_id,
     double time_sec,
@@ -564,6 +572,8 @@ asynStatus LinmotController::runCurveTotal(epicsUInt16 curve_id,
         return asynError;
     }
 
+    printf("Running curve %d (time_sec=%g amp_scale=%g offset=%g)\n",
+            curve_id, time_sec, amplitude_scale, offset);
 
     LmTimeCurveTotal tc;
     tc.curve_id = curve_id;
@@ -598,8 +608,7 @@ asynStatus LinmotController::executeProfile()
         st |= getDoubleParam(profileTimeScale_, &timeScale);
         if (st)
             return asynError;
-        // return runCurveScaled(curve_id, timeTotal, ampScale, offset);
-        return asynSuccess;
+        return runCurveScaled(curveId, timeScale, ampScale, offset);
     }
 
     double timeTotal = 0.0;

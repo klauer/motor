@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 
-const double LM_MAX_CURVE_TIME = 42949.0; // 2**32/1e5;
+const double LM_MAX_CURVE_TIME = 21474.0; // 2**32/1e6;
 const double LM_MAX_POSITION = 214748.0; // 2**31/1e4;
 const double LM_MIN_POSITION = -LM_MAX_POSITION;
 const int LM_CYCLE_COUNT_TIMEOUT = 100;
@@ -52,6 +52,14 @@ enum LmProfileMode{
   LM_PROFILE_MODE_SCALED,
   LM_PROFILE_MODE_TOTAL
 };
+
+
+typedef struct __attribute__((packed)) {
+    uint16_t curve_id;
+    int32_t curve_offset;
+    uint16_t time_scale;
+    int16_t amplitude_scale;
+} LmTimeCurveScaled;
 
 
 typedef struct __attribute__((packed)) {
