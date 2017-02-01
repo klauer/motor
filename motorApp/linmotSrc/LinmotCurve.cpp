@@ -529,8 +529,52 @@ asynStatus LinmotController::setCurveBuildStatus(const char *message,
 asynStatus LinmotController::runCurveScaled(epicsUInt16 curve_id,
     double time_scale, double amplitude_scale, double offset)
 {
+    int st = 0;
+    int buildState;
+
+    st |= getIntegerParam(profileBuildState_, &buildState);
+
+    if (st || buildState == PROFILE_BUILD_BUSY) {
+        setStringParam(profileExecuteMessage_, "Curve access busy");
+        return asynError;
+    }
+
+    if (curve_id <= 0 || curve_id > LM_MAX_CURVE_ID) {
+        setStringParam(profileExecuteMessage_, "Invalid curve ID");
+        return asynError;
+    }
+
+    if (time_scale <= 0.0 || time_scale > 2.0) {
+        setStringParam(profileExecuteMessage_, "Bad time scale");
+        return asynError;
+    }
+
+    if (amplitude_scale < -20.0 || amplitude_scale > 20.0) {
+        setStringParam(profileExecuteMessage_, "Bad amplitude scale [-20, 20]");
+        return asynError;
+    }
+
+    if (offset < LM_MIN_POSITION || offset > LM_MAX_POSITION) {
+        setStringParam(profileExecuteMessage_, "Bad position offset");
+        return asynError;
+    }
+
     printf("Running curve %d (time_scale=%g amp_scale=%g offset=%g)\n",
            curve_id, time_scale, amplitude_scale, offset);
+
+    LmTimeCurveScaled tc;
+    tc.curve_id = curve_id;
+    tc.curve_offset = (int32_t)(offset * LM_POSITION_SCALE);
+    tc.time_scale = (int32_t)(time_scale * LM_TC_TIME_SCALE);
+    tc.amplitude_scale = (int16_t)(amplitude_scale * LM_TC_AMPLITUDE_SCALE);
+    tc.__padding__ = 0;
+
+    epicsInt32 *buf = (epicsInt32 *)&tc;
+    return sendCmd(LM_HDR_TIME_CURVE_SCALED,
+            *buf,
+            *(buf + 1),
+            *(buf + 2)
+            );
 
     return asynSuccess;
 }
@@ -561,7 +605,6 @@ asynStatus LinmotController::runCurveTotal(epicsUInt16 curve_id,
         return asynError;
     }
 
-    // Create records, set LOPR/HOPR
     if (amplitude_scale < -20.0 || amplitude_scale > 20.0) {
         setStringParam(profileExecuteMessage_, "Bad amplitude scale [-20, 20]");
         return asynError;
@@ -579,7 +622,7 @@ asynStatus LinmotController::runCurveTotal(epicsUInt16 curve_id,
     tc.curve_id = curve_id;
     tc.curve_offset = (int32_t)(offset * LM_POSITION_SCALE);
     tc.time = (int32_t)(time_sec * LM_CI_XLENGTH_SCALE);
-    tc.amplitude_scale = (int16_t)(amplitude_scale * 1.0e3);
+    tc.amplitude_scale = (int16_t)(amplitude_scale * LM_TC_AMPLITUDE_SCALE);
 
     epicsInt32 *buf = (epicsInt32 *)&tc;
     return sendCmd(LM_HDR_TIME_CURVE_TOTAL,
