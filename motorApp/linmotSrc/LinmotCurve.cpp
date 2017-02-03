@@ -1,6 +1,7 @@
 #include "LinmotCurve.h"
 #include "LinmotMotorDriver.h"
 #include <epicsThread.h>
+#include <epicsEndian.h>
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -700,8 +701,7 @@ asynStatus LinmotController::executeProfile()
 
 int __curve_test(void)
 {
-    // assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
-    // assert(__LITTLE_ENDIAN__);
+    assert(EPICS_ENDIAN_LITTLE);
     assert((offsetof(LmCurveInfo, data_offset) == 0));
     assert((offsetof(LmCurveInfo, wizard_params[6]) == 66));
     assert(sizeof(LmCurveInfo) == 72);
