@@ -65,6 +65,8 @@ in file LICENSE that is included with this distribution.
 * .20 11-24-14 rls - Moved "WAIT MODE NOWAIT" from EnsembleAsynConfig to motorAxisSetInteger 
 *                    where torque is enabled/disabled. 
 * .21 10-14-15 rls - Use "ReverseDirec" parameter to set "HomeSetup" parameter.
+* .22 01-01-16 zo  - Support deferred moves; revert to MOVEINC/MOVEABS
+=======
 */
 
 
@@ -95,6 +97,8 @@ in file LICENSE that is included with this distribution.
 #include "drvEnsembleAsyn.h"
 #include "ParameterId.h"
 #include "epicsExport.h"
+
+
 
 motorAxisDrvSET_t motorEnsemble = 
 {
@@ -132,6 +136,7 @@ typedef struct
     epicsEventId pollEventId;
     epicsMutexId sendReceiveMutex;
     AXIS_HDL pAxis;  /* array of axes */
+    int movesDeferred;
 } EnsembleController;
 
 typedef struct motorAxisHandle
@@ -153,6 +158,11 @@ typedef struct motorAxisHandle
     Switch_Level swconfig;
     int lastFault;
     bool ReverseDirec;
+    double deferred_position;
+    double deferred_velocity;
+    double deferred_acceleration;
+    int deferred_move;
+    int deferred_relative;
 } motorAxis;
 
 typedef struct
@@ -172,6 +182,7 @@ static asynStatus sendAndReceive(EnsembleController *, char *, char *, int);
 #define FLOW    motorAxisTraceFlow
 #define TERROR   motorAxisTraceError
 #define IODRIVER  motorAxisTraceIODriver
+#define MOTOR_ERROR   motorAxisTraceError
 
 #define ENSEMBLE_MAX_AXES 10
 #define BUFFER_SIZE 100 /* Size of input and output buffers */
@@ -205,6 +216,9 @@ static motorEnsemble_t drv = {NULL, NULL, motorEnsembleLogMsg, 0, {0, 0}};
 static int numEnsembleControllers;
 /* Pointer to array of controller structures */
 static EnsembleController *pEnsembleController=NULL;
+
+/*Deferred moves functions.*/
+static int processDeferredMoves(const EnsembleController * pController);
 
 static void motorAxisReportAxis(AXIS_HDL pAxis, int level)
 {
@@ -251,6 +265,14 @@ static int motorAxisInit(void)
 
             /*Set GAIN_SUPPORT on so that at least, CNEN functions. */
             motorParam->setInteger(pAxis->params, motorAxisHasClosedLoop, 1);
+            /*Initialise deferred move flags.*/
+            pAxis->deferred_relative = 0;
+            pAxis->deferred_position = 0;
+            pAxis->deferred_velocity = 0;
+            pAxis->deferred_acceleration = 0;
+            /*Disable deferred move for the axis. Should not cause move of this axis
+             if other axes in same group do deferred move.*/
+            pAxis->deferred_move = 0;
 
             motorParam->callCallback(pAxis->params);
             epicsMutexUnlock(pAxis->mutexId);
@@ -312,16 +334,35 @@ static int motorAxisGetInteger(AXIS_HDL pAxis, motorAxisParam_t function, int * 
     if (pAxis == NULL || pAxis->params == NULL)
         return (MOTOR_AXIS_ERROR);
     else
-        return (motorParam->getInteger(pAxis->params, (paramIndex) function, value));
+    {
+        switch (function) {
+        case motorAxisDeferMoves:
+            *value = pAxis->pController->movesDeferred;
+            return MOTOR_AXIS_OK;
+            break;
+        default:
+            return motorParam->getInteger(pAxis->params, (paramIndex) function, value);
+        }
+    }
 }
 
 static int motorAxisGetDouble(AXIS_HDL pAxis, motorAxisParam_t function, double * value)
 {
     if (pAxis == NULL || pAxis->params == NULL)
-        return (MOTOR_AXIS_ERROR);
+       return MOTOR_AXIS_ERROR;
     else
-        return (motorParam->getDouble(pAxis->params, (paramIndex) function, value));
+    {
+        switch (function) {
+        case motorAxisDeferMoves:
+            *value = pAxis->pController->movesDeferred;
+            return MOTOR_AXIS_OK;
+            break;
+        default:
+            return motorParam->getDouble(pAxis->params, (paramIndex) function, value);
+        }
 }
+}
+
 
 static int motorAxisSetCallback(AXIS_HDL pAxis, motorAxisCallbackFunc callback, void * param)
 {
@@ -331,9 +372,59 @@ static int motorAxisSetCallback(AXIS_HDL pAxis, motorAxisCallbackFunc callback, 
         return (motorParam->setCallback(pAxis->params, callback, param));
 }
 
+/**
+ * Process deferred moves for a controller and groups.
+ * This function calculates which unique groups in the controller
+ * and passes the controller pointer and group name to processDeferredMovesInGroup.
+ * @return motor driver status code.
+ */
+static int processDeferredMoves(const EnsembleController * pController)
+{
+    int status = MOTOR_AXIS_ERROR;
+    char inputBuff[BUFFER_SIZE], outputMoveBuff[BUFFER_SIZE];
+    int i = 0;
+    int axis = 0;
+    const char *moveCommand;
+    AXIS_HDL pAxis = NULL;
+
+    /*Loop over axes, testing for unique groups.*/
+    for(axis=0; axis<pController->numAxes; axis++) {
+        pAxis = &pController->pAxis[axis];
+
+        if (pAxis == NULL || pAxis->pController == NULL)
+            return (MOTOR_AXIS_ERROR);
+
+        PRINT(pAxis->logParam, FLOW, "Processing deferred moves on Ensemble: %d\n", pAxis->card);
+        if(pAxis->deferred_move == 1) {
+            if(i == 0) {  //use abs or rel from first axis
+                if(pAxis->deferred_relative)
+                    moveCommand = "MOVEINC";
+                else
+                    moveCommand = "MOVEABS";
+                sprintf(outputMoveBuff, "%s", moveCommand);
+                i = 1;
+            }
+            sprintf(outputMoveBuff, "%s @%d %.*f @%dF %.*f", outputMoveBuff, axis, pAxis->maxDigits,
+                    pAxis->deferred_position * fabs(pAxis->stepSize), axis, pAxis->maxDigits,
+                    pAxis->deferred_velocity * fabs(pAxis->stepSize));
+
+            /* clear deferred move flag */
+            pAxis->deferred_move = 0;
+        }
+    }
+    /* if we processed at least 1 axis */
+    if (i != 0) {
+        status = sendAndReceive(pAxis->pController, outputMoveBuff, inputBuff, sizeof(inputBuff));
+    }
+    return status;
+}
+
+
+
 static int motorAxisSetDouble(AXIS_HDL pAxis, motorAxisParam_t function, double value)
 {
     asynStatus status = asynSuccess;
+    int ret_status = 0;
     char inputBuff[BUFFER_SIZE], outputBuff[BUFFER_SIZE];
 
     if (pAxis == NULL || pAxis->pController == NULL)
@@ -389,6 +480,25 @@ static int motorAxisSetDouble(AXIS_HDL pAxis, motorAxisParam_t function, double 
         PRINT(pAxis->logParam, TERROR, "Ensemble does not support setting derivative gain\n");
         break;
     }
+    case motorAxisDeferMoves:
+    {
+        if (value == 0.0 && pAxis->pController->movesDeferred != 0) {
+            PRINT(pAxis->logParam, FLOW, "Processing deferred moves on Ensemble %d \n", pAxis->card);
+            ret_status = processDeferredMoves(pAxis->pController);
+            pAxis->pController->movesDeferred = (int)value;
+        } else {
+            PRINT(pAxis->logParam, FLOW, "Setting deferred move mode on Ensemble %d to %d\n", pAxis->card, value);
+            pAxis->pController->movesDeferred = (int)value;
+            ret_status = 0;
+        }
+        if (ret_status) {
+            PRINT(pAxis->logParam, MOTOR_ERROR, "Deferred moved failed on Ensemble %d, status=%d\n", pAxis->card, status);
+            status = asynError;
+        } else {
+            status = asynSuccess;
+        }
+        break;
+    }
     default:
         PRINT(pAxis->logParam, TERROR, "motorAxisSetDouble: unknown function %d\n", function);
         break;
@@ -440,6 +550,23 @@ static int motorAxisSetInteger(AXIS_HDL pAxis, motorAxisParam_t function, int va
         ret_status = sendAndReceive(pAxis->pController, (char *) "WAIT MODE NOWAIT", inputBuff, sizeof(inputBuff));
 
         break;
+    case motorAxisDeferMoves:
+        if (value == 0 && pAxis->pController->movesDeferred != 0) {
+            PRINT(pAxis->logParam, FLOW, "Processing deferred moves on Ensemble %d \n", pAxis->card);
+            ret_status = processDeferredMoves(pAxis->pController);
+            pAxis->pController->movesDeferred = (int)value;
+        } else {
+            PRINT(pAxis->logParam, FLOW, "Setting deferred move mode on Ensemble %d to %d\n", pAxis->card, value);
+            pAxis->pController->movesDeferred = (int)value;
+            ret_status = 0;
+        }
+        if (ret_status) {
+            PRINT(pAxis->logParam, MOTOR_ERROR, "Deferred moved failed on Ensemble %d, status=%d\n", pAxis->card, status);
+            status = asynError;
+        } else {
+            status = asynSuccess;
+        }
+        break;
     default:
         PRINT(pAxis->logParam, TERROR, "motorAxisSetInteger: unknown function %d\n", function);
         break;
@@ -472,40 +599,37 @@ static int motorAxisMove(AXIS_HDL pAxis, double position, int relative,
     PRINT(pAxis->logParam, FLOW, "Set card %d, axis %d move to %f, min vel=%f, max_vel=%f, accel=%f\n",
           pAxis->card, axis, position, min_velocity, max_velocity, acceleration);
 
-    if (relative)
-    {
-        if (position >= 0.0)
-            posdir = true;
-        else
-            posdir = false;
-        moveCommand = "INC";
-    }
-    else
-    {
-        if (position >= pAxis->currentCmdPos)
-            posdir = true;
-        else
-            posdir = false;
-        moveCommand = "ABS";
-    }
-
-    sprintf(outputBuff, "%s", moveCommand);
-    ret_status = sendAndReceive(pAxis->pController, outputBuff, inputBuff, sizeof(inputBuff));
-    if (ret_status)
-        return (MOTOR_AXIS_ERROR);
-
     if (acceleration > 0)
     { /* only use the acceleration if > 0 */
         sprintf(outputBuff, "RAMP RATE %.*f", maxDigits, acceleration * fabs(pAxis->stepSize));
         ret_status = sendAndReceive(pAxis->pController, outputBuff, inputBuff, sizeof(inputBuff));
     }
 
-    sprintf(outputBuff, "LINEAR @%d %.*f F%.*f", axis, maxDigits, position * fabs(pAxis->stepSize),
-            maxDigits, max_velocity * fabs(pAxis->stepSize));
+    if (pAxis->pController->movesDeferred == 0) {
+        if (relative)
+        {
+            posdir = (position >= 0.0);
+            moveCommand = "MOVEINC";
+        } else {
+            posdir = (position >= pAxis->currentCmdPos);
+            moveCommand = "MOVEABS";
+        }
 
-    ret_status = sendAndReceive(pAxis->pController, outputBuff, inputBuff, sizeof(inputBuff));
-    if (ret_status)
-        return (MOTOR_AXIS_ERROR);
+        sprintf(outputBuff, "%s @%d %.*f F%.*f", moveCommand, axis, maxDigits, 
+                position * fabs(pAxis->stepSize), maxDigits, 
+                max_velocity * fabs(pAxis->stepSize));
+
+        ret_status = sendAndReceive(pAxis->pController, outputBuff, inputBuff, sizeof(inputBuff));
+
+        if (ret_status)
+            return (MOTOR_AXIS_ERROR);
+    } else {
+        pAxis->deferred_position = position;
+        pAxis->deferred_velocity = max_velocity;
+        pAxis->deferred_acceleration = acceleration;
+        pAxis->deferred_move = 1;
+        pAxis->deferred_relative = relative ? 1 : 0;
+    }
 
     if (epicsMutexLock(pAxis->mutexId) == epicsMutexLockOK)
     {
@@ -640,6 +764,10 @@ static int motorAxisStop(AXIS_HDL pAxis, double acceleration)
      * so don't worry about the acceleration rate, just stop the motion on the axis */
     sprintf(outputBuff, "ABORT @%d", pAxis->axis);    
     ret_status = sendAndReceive(pAxis->pController, outputBuff, inputBuff, sizeof(inputBuff));
+
+    /*Clear defer move flag for this axis.*/
+    pAxis->deferred_move = 0;
+
     return (ret_status);
 }
 
@@ -715,12 +843,17 @@ static void EnsemblePoller(EnsembleController *pController)
                     comStatus = sendAndReceive(pController, (char *) "PLANESTATUS(0)", inputBuff, sizeof(inputBuff));
                     move_active = (0x01 & atoi(&inputBuff[1])) ? true : false;
                     move_active |= axisStatus.Bits.move_active;
+                    /* Set the axis done parameter */
+                    /* OR the active flag with the deferred_move.*/
+                    move_active |= (pAxis->deferred_move != 0);
                     motorParam->setInteger(params, motorAxisDone, !move_active);
                     if (move_active)
                         anyMoving = true;
 
                     motorParam->setInteger(pAxis->params, motorAxisPowerOn, axisStatus.Bits.axis_enabled);
                     motorParam->setInteger(pAxis->params, motorAxisHomeSignal, axisStatus.Bits.home_limit);
+                    motorParam->setInteger(pAxis->params, motorAxisHomed, axisStatus.Bits.home_cycle_complete);
+
 
                     if (pAxis->ReverseDirec == true)
                         motorParam->setInteger(pAxis->params, motorAxisDirection, axisStatus.Bits.motion_ccw);
