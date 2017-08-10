@@ -1,0 +1,29 @@
+# Set the aux bits on specific channel
+record(bo, "$(P)$(M):AUX_Status") {
+  field(DESC, "$(DESC)")
+  field(OUT,  "$(P)$(M):AUX_OUT.VAL")
+  field(ZNAM, "$(ZNAM)")
+  field(ONAM, "$(ONAM)")
+  field(FLNK, "$(P)$(M):AUX_OUT")
+}
+
+record(ao,"$(P)$(M):AUX_OUT") {
+  field(DESC, "Auxilary pin setup for axis $(ADDR)")
+  field(DTYP, "asynInt32")
+  field(OUT,  "@asyn($(PORT),$(ADDR))MOTOR_AUX")
+}
+
+# Read aux bit on specific channel
+record(ai,"$(P)$(M):AUX_IN") {
+  field(DESC, "Auxilary pin readback for axis $(ADDR)")
+  field(DTYP, "asynInt32")
+  field(INP,  "@asyn($(PORT),$(ADDR))MOTOR_AUX")
+  field(SCAN, "I/O Intr")
+}
+
+record(bi, "$(P)$(M):AUX_Status_RBV") {
+  field(DESC, "$(DESC) Readback")
+  field(INP,  "$(P)$(M):AUX_IN.VAL CP")
+  field(ZNAM, "$(ZNAM)")
+  field(ONAM, "$(ONAM)")
+}

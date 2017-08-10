@@ -1,0 +1,25 @@
+# Database for OmsAsyn
+
+# Send a command to the controller
+record(stringout,"$(DEV):$(AREA):$(LOC):OMS_STRING_SEND") {
+    field(DESC,"Oms String Send")
+    field(DTYP, "asynOctetWrite")
+    field(OUT,  "@asyn($(PORT),0)OMS_STRING_SEND")
+}
+
+# Use with OMS_STRING_RECV
+# Send a command to the controller, read and copy the answer from the controller to OMS_STRING_RECV
+record(stringout,"$(DEV):$(AREA):$(LOC):OMS_STRING_SENDRECV") {
+    field(DESC,"Oms String Send Receive")
+    field(DTYP, "asynOctetWrite")
+    field(OUT,  "@asyn($(PORT),0)OMS_STRING_SENDRECV")
+}
+
+# Use with OMS_STRING_SENDRECV
+# caput OMS_STRING_RECV.PROC 1 to update the PV value
+record(stringin,"$(DEV):$(AREA):$(LOC):OMS_STRING_RECV") {   
+    field(DESC,"Oms String Receive")
+    field(DTYP, "asynOctetRead")
+    field(INP,  "@asyn($(PORT),0)OMS_STRING_RECV")
+    field(SCAN, "I/O Intr")
+}

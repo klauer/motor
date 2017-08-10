@@ -2,6 +2,10 @@
 FILENAME...     omsMAXv.h
 USAGE...        Pro-Dex OMS MAXv asyn motor controller support
 
+Version:        $Revision$
+Modified By:    $Author$
+Last Modified:  $Date$
+HeadURL:        $URL$
 */
 
 /*
@@ -12,14 +16,18 @@ USAGE...        Pro-Dex OMS MAXv asyn motor controller support
 #ifndef OMSMAXV_H_
 #define OMSMAXV_H_
 
-#include <devLib.h>
 #include "omsBaseController.h"
+#include <devLib.h>
 
 #define BUFFER_SIZE	1024
 
 #define MAXv_NUM_CARDS           15		/* maximum number of cards */
-#define OMS_INT_VECTOR          180     /* default interrupt vector (64-255) */
+#define OMS_INT_VECTOR          180             /* default interrupt vector (64-255) */
 #define OMS_INT_LEVEL           5 		/* default interrupt level (1-6) */
+
+#define RTpositionString     "RT_POSITIONS"   /* asynInt32Array,  r/o */
+#define auxString            "AUX"            /* asynInt32Array,  r/o */
+#define gpioString           "GPIO"           /* asynInt32Array,  r/o */
 
 /* Limit Switch Status - Offset = 0x40 */
 typedef union
@@ -87,6 +95,22 @@ typedef union
     } Bits;
 } FIRMWARE_STATUS;
 
+/* RT position structure */
+typedef union
+{
+   epicsUInt16 All[5];
+   struct
+   { 
+
+       epicsUInt16  encoderMSB  :16;   /* encoder position */
+       epicsUInt16  encoderLSB  :16;   /* encoder position */
+       epicsUInt8   axis        :8;    /* axis */     
+       epicsUInt8   home        :8;    /* home switch and home event bits */
+       epicsUInt16  ioPos       :16;   /* positive I/O bits */
+       epicsUInt16  ioNeg       :16;   /* negative I/O bits */
+   } RTposition;
+} RTPC_TBL_ENTRY;
+
 
 /* Status#1 - Offset = 0xFC0 */
 typedef union
@@ -128,7 +152,13 @@ struct MAXv_motor
     epicsUInt8 outBuffer[BUFFER_SIZE];
     epicsUInt8 inBuffer[BUFFER_SIZE];
     epicsUInt8 utility[BUFFER_SIZE];
-    epicsUInt32 naD00[176];	/* N/A byte offset 0xD00 - 0xFBF. */
+
+    epicsUInt32 naD00[37];	// N/A byte offset 0xD00 - 0xD93. 
+    epicsUInt8 rtpcPutIndex;
+    epicsUInt8 rtpcGetIndex;
+    RTPC_TBL_ENTRY rtpcTblEntry[55];
+    epicsUInt16 naFBE[2];	       // N/A byte offset 0xFBE - 0xFBF.
+
     STATUS1	status1_flag;
     STATUS1	status1_irq_enable;
     epicsUInt32 status2_flag;
@@ -142,12 +172,37 @@ struct MAXv_motor
 
 };
 
+typedef struct MAXv_RT {
+    char *portName;
+    epicsMutexId lock;
+    epicsEventId pollRTEventId_;
+
+    /* Asyn interfaces */
+    asynInterface common;
+    asynInterface asynInt32Array;
+    asynInterface asyndrvUser;
+
+    asynUser *pasynUser;
+    asynStatus status;
+
+    void *asynInt32ArrayPvt;
+
+    epicsInt32 encPos[8];
+} MAXv_RT;
+
+
 class omsMAXv : public omsBaseController {
 public:
 	omsMAXv(const char*, int, int, const char*, int, int, unsigned int, int, int, const char*, int);
 	omsMAXv(const char*, int, int, const char*, int, int, int );
-    asynStatus sendReceive(const char *, char *, unsigned int );
+    asynStatus sendReceive(const char *, char *, unsigned int, size_t *);
     asynStatus sendOnly(const char *);
+    asynStatus readInt32Array(asynUser *pasynUser, epicsInt32 *value,size_t nElements, size_t *nIn);
+    asynStatus getRTposition();
+    virtual asynStatus flushQueues();
+    static void callRTPoller(void*);
+    asynStatus startRTPoller();
+    void omsRTPoller();
     static char* baseAddress;
     static epicsAddressType addrType;
     static int numCards;
@@ -155,6 +210,7 @@ public:
     static epicsUInt8 interruptLevel;
     static void InterruptHandler( void * param );
     void* getCardAddress(){return (void*) pmotor;};
+    void* getRTAddress(){return (void*) pRT;};
     static void resetOnExit(void* param){((omsMAXv*)param)->resetIntr();};
     void resetIntr();
     int getCardNo(){return cardNo;};
@@ -162,10 +218,16 @@ public:
 protected:
 	virtual void initialize(const char*, int, int, const char*, int, int, unsigned int, int, int, epicsAddressType, int );
 
+	int RTposition;
+        int aux;
+	int gpio;
 private:
     void motorIsrSetup(volatile unsigned int, volatile epicsUInt8);
     int cardNo;
+    epicsThreadId RTpositionThread;
+    int priority, stackSize;
     volatile struct MAXv_motor *pmotor;
+    struct MAXv_RT *pRT;
     char readBuffer[BUFFER_SIZE];
 };
 

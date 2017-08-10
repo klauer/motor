@@ -1,0 +1,27 @@
+# Set GPIO bits
+record(mbboDirect,"$(P)$(M):GPIO_SET_bit") {
+  field(DESC, "Set MAXv GPIO by bits")
+  field(OUT,  "$(P)$(M):GPIO_SET.VAL")
+  field(NOBT, "16")
+  field(FLNK, "$(P)$(M):GPIO_SET")
+}
+
+record(ao,"$(P)$(M):GPIO_SET") {
+  field(DESC, "Set GPIO value to MAXv")
+  field(DTYP, "asynInt32")
+  field(OUT,  "@asyn($(PORT),$(ADDR))OMS_GPIO")
+}
+
+# Read GPIO bits
+record(ai,"$(P)$(M):GPIO_READ") {
+  field(DESC, "Read GPIO value from MAXv)")
+  field(DTYP, "asynInt32")
+  field(INP,  "@asyn($(PORT),$(ADDR))OMS_GPIO")
+  field(SCAN, "I/O Intr")
+}
+
+record(mbbiDirect,"$(P)$(M):GPIO_READ_bit") {
+  field(DESC, "Read MAXv GPIO by bits")
+  field(INP,  "$(P)$(M):GPIO_READ.VAL CP")
+  field(NOBT, "16")
+}

@@ -2,6 +2,10 @@
 FILENAME...     omsBaseController.h
 USAGE...        Pro-Dex OMS asyn motor base controller support
 
+Version:        $Revision$
+Modified By:    $Author$
+Last Modified:  $Date$
+HeadURL:        $URL$
 */
 
 /*
@@ -18,23 +22,26 @@ USAGE...        Pro-Dex OMS asyn motor base controller support
 #include <epicsMutex.h>
 #include <ellLib.h>
 #include <iocsh.h>
+#include <epicsExport.h>
 #include <errlog.h>
+
 #include "asynMotorController.h"
 #include "omsBaseAxis.h"
-#include <epicsExport.h>
 
-#define OMS_MAX_AXES 10
+#define OMS_MAX_AXES 8
 #define OMSBASE_MAXNUMBERLEN 12
-#define OMSINPUTBUFFERLEN OMSBASE_MAXNUMBERLEN * OMS_MAX_AXES + 2
+#define OMSINPUTBUFFERLEN OMSBASE_MAXNUMBERLEN * OMS_MAX_AXES + 3
 
-class omsBaseController : public asynMotorController {
+class epicsShareFunc omsBaseController : public asynMotorController {
 public:
     omsBaseController(const char *portName, int numAxes, int priority, int stackSize, int extMotorParams);
     virtual asynStatus readInt32(asynUser *pasynUser, epicsInt32 *value);
     virtual asynStatus writeInt32(asynUser *pasynUser, epicsInt32 value);
+    virtual asynStatus readFloat64(asynUser *pasynUser, epicsFloat64 *value);
     virtual asynStatus writeFloat64(asynUser *pasynUser, epicsFloat64 value);
     virtual void report(FILE *fp, int level);
-    virtual asynStatus sendReceive(const char*, char*, unsigned int ) = 0;
+    virtual asynStatus sendReceive(const char*, char*, unsigned int, size_t *) = 0;
+//    virtual asynStatus sendReceive(const char*, char*, unsigned int) = 0;
     virtual asynStatus sendOnly(const char *outputBuff) = 0;
     void omsPoller();
     virtual asynStatus startPoller(double movingPollPeriod, double idlePollPeriod, int forcedFastPolls);
@@ -44,10 +51,14 @@ public:
 
 protected:
     virtual asynStatus writeOctet(asynUser *, const char *, size_t, size_t *);
+
+    virtual asynStatus readOctet(asynUser *, char *, size_t, size_t *, int *);
+    virtual asynStatus flushOctet(asynUser *);
+
     virtual asynStatus getFirmwareVersion();
     virtual asynStatus Init(const char*, int);
     virtual asynStatus sanityCheck();
-    asynStatus sendReceiveLock(const char*, char*, unsigned int );
+    asynStatus sendReceiveLock(const char*, char*, unsigned int, size_t * );
     asynStatus sendOnlyLock(const char *);
     virtual omsBaseAxis* getAxis(asynUser *pasynUser);
     virtual omsBaseAxis* getAxis(int);
@@ -58,7 +69,7 @@ protected:
     virtual asynStatus getClosedLoopStatus(int clstatus[OMS_MAX_AXES]);
     virtual epicsEventWaitStatus waitInterruptible(double timeout);
     virtual bool watchdogOK();
-    virtual bool resetConnection(){return false;};
+    virtual asynStatus flushQueues() = 0;
     char* getPortName(){return portName;};
     bool firmwareMin(int, int, int);
     static omsBaseController* findController(const char*);
@@ -71,10 +82,17 @@ protected:
     bool useWatchdog;
     bool enabled;
     int numAxes;
+    int sendReceiveIndex;
+    int sendIndex;
+    int receiveIndex;
+    int pollIndex;
+    int motorAux;
+    int omsGpio;
+    int omsAi;
 
 private:
     asynStatus sendReplace(omsBaseAxis*, char*);
-    asynStatus sendReceiveReplace(omsBaseAxis*, char *, char *, int);
+    asynStatus sendReceiveReplace(omsBaseAxis*, char *, char *, unsigned int, size_t *);
     asynStatus getSubstring(unsigned int , char* , char *, unsigned int);
     int sanityCounter;
     epicsThreadId motorThread;
@@ -83,10 +101,6 @@ private:
     omsBaseAxis** pAxes;
     int controllerNumber;
     epicsMutex *baseMutex;
-    int sendReceiveIndex;
-    int sendIndex;
-    int receiveIndex;
-    int pollIndex;
     int priority, stackSize;
 
     friend class omsBaseAxis;

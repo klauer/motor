@@ -6,6 +6,7 @@ include $(TOP)/configure/CONFIG
 
 # 
 #USR_CXXFLAGS += -DDEBUG
+USR_CXXFLAGS += -DHAS_IOOPS_H
 
 DBD += omsAsynSupport.dbd
 
@@ -17,9 +18,10 @@ SRCS += omsMAXnet.cpp
 SRCS += omsMAXv.cpp
 #SRCS += omsMAXvEncFunc.cpp
 
-omsAsyn_LIBS += motor
-omsAsyn_LIBS += asyn
-omsAsyn_LIBS += $(EPICS_BASE_IOC_LIBS)
+oms_LIBS += motor
+oms_LIBS += asyn
+oms_LIBS += miscUtils
+oms_LIBS += $(EPICS_BASE_IOC_LIBS)
 
 include $(TOP)/configure/RULES
 #----------------------------------------

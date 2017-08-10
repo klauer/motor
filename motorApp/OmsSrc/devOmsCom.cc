@@ -2,6 +2,10 @@
 FILENAME...     devOmsCom.cc
 USAGE...        Data and functions common to all OMS device level support.
 
+Version:        $Revision$
+Modified By:    $Author$
+Last Modified:  $Date$
+HeadURL:        $URL: https://subversion.xor.aps.anl.gov/synApps/motor/trunk/motorApp/OmsSrc/devOmsCom.cc $
 */
 
 /*
@@ -66,8 +70,6 @@ USAGE...        Data and functions common to all OMS device level support.
  *                   different polarity (signs).
  * .24  11-29-12 rls Terminate UU command argument with a ';' character.
  *                   Fixes "Command error" with MAXv ver:1.41 firmware.
- * .25  03-13-15 rls Bug fix for incorrect deceleration calculation at end of
- *                   JOG command.
  *
  */
 
@@ -78,7 +80,6 @@ USAGE...        Data and functions common to all OMS device level support.
 #include <epicsThread.h>
 #include <epicsString.h>
 #include <dbAccess.h>
-#include <stdlib.h>
 
 #include "motorRecord.h"
 #include "motor.h"
@@ -207,7 +208,7 @@ RTN_STATUS oms_build_trans(motor_cmnd command, double *parms, struct motorRecord
     struct motor_trans *trans = (struct motor_trans *) mr->dpvt;
     struct mess_node *motor_call;
     struct controller *brdptr;
-    struct MAXvController *MAXvCntrl = NULL;
+    struct MAXvController *MAXvCntrl;
     char buffer[40];
     msg_types cmnd_type;
     RTN_STATUS rtnind;
@@ -229,8 +230,7 @@ RTN_STATUS oms_build_trans(motor_cmnd command, double *parms, struct motorRecord
     if (trans->state != BUILD_STATE)
         return(rtnind = ERROR);
 
-    if ((brdptr = (*trans->tabptr->card_array)[card]) == NULL) /* Test for disabled board. */
-        return(rtnind = ERROR);
+    brdptr = (*trans->tabptr->card_array)[card];
 
     if (strncmp(brdptr->ident, "MAXv", 4) == 0)
     {
@@ -284,8 +284,8 @@ RTN_STATUS oms_build_trans(motor_cmnd command, double *parms, struct motorRecord
         else
             strcpy(buffer, mr->init);
 
+        strcat(motor_call->message, " ");
         strcat(motor_call->message, buffer);
-        strcat(motor_call->message, ";");
     }
     else
     {
@@ -310,7 +310,7 @@ RTN_STATUS oms_build_trans(motor_cmnd command, double *parms, struct motorRecord
 
                 /* Use MIP to determine which acc. rate to use. */
                 if (mr->mip & MIP_JOG_STOP)
-                    acc = mr->jar / fabs(mr->mres);
+                    acc = ((mr->jar) / fabs(mr->mres)) / mr->accl;
                 else
                     acc = ((mr->velo - mr->vbas) / fabs(mr->mres)) / mr->accl;
 
@@ -451,9 +451,9 @@ errorexit:                  errMessage(-1, "Invalid device directive");
                 case SET_IGAIN:
                 case SET_DGAIN:
                     if (MAXv == true)
-                        sprintf(buffer, "%.1f;", (parms[itera] * 32767.0));
+                        sprintf(buffer, "%.1f", (parms[itera] * 32767.0));
                     else
-                        sprintf(buffer, "%.1f;", (parms[itera] * 1999.9));
+                        sprintf(buffer, "%.1f", (parms[itera] * 1999.9));
                     break;
 
                 case SET_VELOCITY:  /* OMS errors if VB = VL. */
@@ -518,7 +518,7 @@ errorexit:                  errMessage(-1, "Invalid device directive");
                 break;
 
             case LOAD_POS:
-                if ((MAXv == true) && (MAXvCntrl != NULL) && (MAXvCntrl->typeID[signal] != PSO) && (MAXvCntrl->fwver > 1.29))
+                if ((MAXv == true) && (MAXvCntrl->typeID[signal] != PSO))
                 {
                     long int ref  = NINT(parms[0]);
                     long int fdbk = ref;

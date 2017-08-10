@@ -2,6 +2,10 @@
 FILENAME...     drvOms.cc
 USAGE...        Driver level support for OMS models VME8, VME44, VS4 and VX2.
 
+Version:        $Revision$
+Modified By:    $Author$
+Last Modified:  $Date$
+HeadURL:        $URL: https://subversion.xor.aps.anl.gov/synApps/motor/trunk/motorApp/OmsSrc/drvOms.cc $
 */
 
 /*
@@ -78,8 +82,6 @@ USAGE...        Driver level support for OMS models VME8, VME44, VS4 and VX2.
  * .17  07-26-12 rls - Added reboot flag to IRQ control register. Driver
  *                     sets IRQ_RESET_ID bit on; set_status() and send_mess()
  *                     read IRQ register and disable board if flag is off.
- * .18  11-15-03 rls - Added bus flushing read on exit from ISR to prevent
- *                     "out of order transactions".
  */
 
 /*========================stepper motor driver ========================
@@ -110,8 +112,6 @@ USAGE...        Driver level support for OMS models VME8, VME44, VS4 and VX2.
 #include        <epicsInterrupt.h>
 #include        <epicsExit.h>
 #include        <epicsEvent.h>
-#include        <errlog.h>
-#include        <stdlib.h>
 
 #include        "motor.h"
 #include        "drvOms.h"
@@ -900,8 +900,8 @@ static void motorIsr(int card)
         }
         irqdata->recv_sem->signal();
     }
-    pmotor->control = control;  /* Update-interrupt state. */
-    control = pmotor->control;  /* Read it back to flush last write cycle. */
+    /* Update-interrupt state */
+    pmotor->control = control;
 }
 
 static int motorIsrEnable(int card)
@@ -1011,7 +1011,7 @@ static void motorIsrDisable(int card)
 /*****************************************************/
 RTN_STATUS
 omsSetup(int num_cards,  /* maximum number of cards in rack */
-         void *addrs,    /* Base Address(see README for details) */
+         void *addrs,    /* Base Address(0x0-0xb000 on 4K boundary) */
          unsigned vector,/* noninterrupting(0), valid vectors(64-255) */
          int int_level,  /* interrupt level (1-6) */
          int scan_rate)  /* polling rate - 1-60 Hz */

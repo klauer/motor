@@ -2,6 +2,10 @@
 FILENAME...     devOmsPC68.c
 USAGE...        Motor record device level support for OMS VME58.
 
+Version:        $Revision$
+Modified By:    $Author$
+Last Modified:  $Date$
+HeadURL:        $URL: https://subversion.xor.aps.anl.gov/synApps/motor/trunk/motorApp/OmsSrc/devOmsPC68.cc $
 */
 
 /*

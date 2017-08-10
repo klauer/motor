@@ -2,6 +2,10 @@
 FILENAME...     omsMAXv.cpp
 USAGE...        Pro-Dex OMS MAXv asyn motor controller support
 
+Version:        $Revision$
+Modified By:    $Author$
+Last Modified:  $Date$
+HeadURL:        $URL$
 */
 
 /*
@@ -14,17 +18,23 @@ USAGE...        Pro-Dex OMS MAXv asyn motor controller support
 #include <string.h>
 #include <stdio.h>
 
+#include "omsMAXv.h"
+
+#include "asynDriver.h"
+#include "asynStandardInterfaces.h"
 #include "asynOctetSyncIO.h"
+#include "asynInt32Array.h"
 #include <epicsInterrupt.h>
 #include <epicsExit.h>
-#include "omsMAXv.h"
+#include <cantProceed.h>
 #ifdef HAS_IOOPS_H
 #include "basicIoOps.h"
 #endif
 
-static const char *driverName = "omsMAXvAsyn";
+static const char *driverName = "omsMAXvDriver";
 
 #define MIN(a,b) ((a)<(b)? (a): (b))
+#define OMS_MAXV_PARAMS_COUNT 1
 
 #ifdef __GNUG__
     #ifdef      DEBUG
@@ -36,6 +46,7 @@ static const char *driverName = "omsMAXvAsyn";
 #else
     #define Debug
 #endif
+
 volatile int motorMAXvdebug = 0;
 extern "C" {epicsExportAddress(int, motorMAXvdebug);}
 
@@ -44,6 +55,12 @@ int   omsMAXv::numCards = 0;
 epicsUInt32 omsMAXv::baseInterruptVector = OMS_INT_VECTOR;
 epicsUInt8 omsMAXv::interruptLevel = OMS_INT_LEVEL;
 epicsAddressType omsMAXv::addrType = atVMEA16;
+
+
+enum directCommand { CONTROLLER_ID_QUERY = 1, 
+                     KILL_ALL_MOTION     = 2, 
+                     RESET_CONTROLLER    = 3, 
+                     SOFTBOOT_CONTROLLER = 4 };
 
 static void writeReg8(volatile epicsUInt8 *a8, epicsUInt8 value)
 {
@@ -116,14 +133,20 @@ static void readRegMem(char *bufptr, volatile char *memptr, int size)
 #endif
 }
 
+
+
+
 void omsMAXv::InterruptHandler( void * param )
 {
     omsMAXv* pController = (omsMAXv*) param;
-    volatile struct MAXv_motor *pmotor = (MAXv_motor*) pController->getCardAddress();;
+    volatile struct MAXv_motor *pmotor = (MAXv_motor*) pController->getCardAddress();
+    volatile struct MAXv_RT *pRT = (MAXv_RT*) pController->getRTAddress();
     STATUS1 status1_flag;
+    epicsUInt32 status2_flag;
     static char errmsg[65];
 
     status1_flag.All = readReg32(&(pmotor->status1_flag.All));
+    status2_flag = readReg32(&(pmotor->status2_flag));
 
     /* Motion done handling */
     if (status1_flag.Bits.done != 0) epicsEventSignal(pController->pollEventId_);
@@ -136,16 +159,21 @@ void omsMAXv::InterruptHandler( void * param )
         epicsInterruptContextMessage(errmsg);
     }
 
-    /* unset this bit to not clear the text_response bit */
+    // not clearing this may corrupt the next read/write operation
     if (status1_flag.Bits.text_response != 0)  status1_flag.Bits.text_response = 0;
 
-    /* Release IRQ's. Clear bits by writing a 1 */
-    writeReg32(&(pmotor->status1_flag.All), status1_flag.All);
+    writeReg32(&(pmotor->status1_flag.All), status1_flag.All); /* Release IRQ's. */
 
     /* do a dummy read to ensure that all previous writes, which may
      * have been queued in the VME bridge chip get processed
      */
     status1_flag.All = readReg32(&(pmotor->status1_flag.All));
+
+    /* RT position done handling */
+    epicsUInt32 t_status2_flag = readReg32(&(pmotor->status2_flag));
+    if (t_status2_flag == 0x100) epicsEventSignal(pRT->pollRTEventId_);
+    writeReg32(&(pmotor->status2_flag), status2_flag); /* Release IRQ's. */
+    status2_flag = readReg32(&(pmotor->status2_flag));
 
 }
 omsMAXv::omsMAXv(const char* portName, int numAxes, int cardNo, const char* initString,
@@ -254,7 +282,7 @@ void omsMAXv::initialize(const char* portName, int numAxes, int cardNo, const ch
             errlogPrintf("%s:%s:%s: Card NOT found in specified address range! \n",
                                 driverName, functionName, portName);
             enabled = false;
-            return;
+            return; 
         }
         startAddr += (boardAddrSize / 10);
     }
@@ -275,9 +303,9 @@ void omsMAXv::initialize(const char* portName, int numAxes, int cardNo, const ch
     int loopCount=15;
     FIRMWARE_STATUS fwStatus;
     fwStatus.All = readReg32(&(pmotor->firmware_status.All));
-    while (loopCount && (fwStatus.Bits.initializing == 1)){
+    while (loopCount && (fwStatus.All & 0x00000002)){
         Debug(1, "MAXv port %s still initializing; status = 0x%x\n",
-                portName, (unsigned int) pmotor->firmware_status.All);
+                portName, fwStatus.All);
         epicsThreadSleep(0.2);
         fwStatus.All = readReg32(&(pmotor->firmware_status.All));
         --loopCount;
@@ -286,25 +314,27 @@ void omsMAXv::initialize(const char* portName, int numAxes, int cardNo, const ch
     Debug(64, "motor_init: check if card is ready\n");
 
     fwStatus.All = readReg32(&(pmotor->firmware_status.All));
-    if (fwStatus.Bits.running == 0)
-        errlogPrintf("MAXv port %s is NOT running; status = 0x%x\n",
-                portName, (unsigned int) pmotor->firmware_status.All);
+    if (!(fwStatus.All & 0x00000004))
+        errlogPrintf("MAXv port %s firmware is NOT running; status = 0x%x\n",
+                portName, fwStatus.All);
 
     Debug(64, "motor_init: init card\n");
 
     fwStatus.All = readReg32(&(pmotor->firmware_status.All));
     Debug(64, "motor_init: firmware status register: 0x%x\n", fwStatus.All);
 
+
     writeReg32(&(pmotor->IACK_vector), intrVector);
 
     writeReg32(&(pmotor->status1_flag.All), 0xFFFFFFFF);
     writeReg32(&(pmotor->status2_flag), 0xFFFFFFFF);
+
     /* Disable all interrupts */
     writeReg32(&(pmotor->status1_irq_enable.All), 0);
     writeReg32(&(pmotor->status2_irq_enable), 0);
 
     Debug(64, "motor_init: clear all interrupt\n");
-    //sendOnly("IC");
+    sendOnly("IC");
 
     Debug(64, "motor_init: firmware version\n");
 
@@ -315,7 +345,7 @@ void omsMAXv::initialize(const char* portName, int numAxes, int cardNo, const ch
         return;
     }
 
-    if (fwMinor < 30 ){
+    if (fwMajor<2 && fwMinor < 30 ){
         errlogPrintf("%s:%s:%s: This Controllers Firmware Version %d.%d is not supported, version 1.30 or higher is mandatory\n",
                         driverName, functionName, portName, fwMajor, fwMinor);
     }
@@ -342,6 +372,25 @@ void omsMAXv::initialize(const char* portName, int numAxes, int cardNo, const ch
         errlogPrintf("%s:%s:%s: card %d, unable to register exit function\n",
                         driverName, functionName, portName, cardNo);
 
+    /* Setting default thread priority and stack size */
+    if (prio == 0)
+        priority = epicsThreadPriorityLow;
+    else
+        priority = prio;
+
+    if (stackSz == 0)
+        stackSize = epicsThreadGetStackSize(epicsThreadStackMedium);
+    else
+        stackSize = stackSz;
+
+    /* RT position capture */
+    pRT = (MAXv_RT *) callocMustSucceed(sizeof(MAXv_RT), sizeof(char), "MAXv RT init");
+    pRT->portName = epicsStrDup(portName);
+    pRT->lock = epicsMutexCreate();
+    pRT->pollRTEventId_ = epicsEventCreate(epicsEventEmpty);
+
+    createParam(RTpositionString,      asynParamInt32Array,         &RTposition);
+    
     return;
 }
 
@@ -349,15 +398,17 @@ void omsMAXv::resetIntr()
 {
     enabled=false;
     writeReg32(&(pmotor->status1_irq_enable.All), 0);
+    writeReg32(&(pmotor->status2_irq_enable), 0);
 }
+
 
 asynStatus omsMAXv::sendOnly(const char *outputBuff)
 {
     STATUS1 flag1;
     const char* functionName = "sendOnly";
     int len = strlen(outputBuff);
-    double timeout = 0.01;
     epicsUInt32 getIndex, putIndex;
+
 
     if (!enabled) return asynError;
     Debug(16, "omsMAXv::send: sending: %s \n", outputBuff);
@@ -369,35 +420,32 @@ asynStatus omsMAXv::sendOnly(const char *outputBuff)
         return asynError;
     }
 
+
     /* see if junk at input port - should not be any data available */
     getIndex = readReg32(&(pmotor->inGetIndex));
     putIndex = readReg32(&(pmotor->inPutIndex));
     int flushTime = 0;
-    while ((getIndex != putIndex) && (flushTime < 100))
+    while (getIndex != putIndex && flushTime < 5 )
     {
         // flush cards response Buffer
 #ifdef DEBUG
         int deltaIndex = ((epicsUInt16)putIndex) - ((epicsUInt16)getIndex);
+#endif
         Debug(32, "%s:%s:%s: flushing %d characters\n",
                 driverName, functionName, portName, (((deltaIndex < 0) ? BUFFER_SIZE +
                         deltaIndex : deltaIndex)));
-#endif
         putIndex = readReg32(&(pmotor->inPutIndex));
 	writeReg32(&(pmotor->inGetIndex), putIndex);
-        //pmotor->status1_flag.Bits.text_response = 0;
         epicsUInt32 t_status = readReg32(&(pmotor->status1_flag.All));
         writeReg32(&(pmotor->status1_flag.All), (t_status & 0xfdffffff));
         flag1.All = readReg32(&(pmotor->status1_flag.All));
         writeReg32(&(pmotor->status1_flag.All), flag1.All);
         writeReg32(&(pmotor->msg_semaphore), 0);
-        epicsThreadSleep(timeout);
+
+        epicsThreadSleep(epicsThreadSleepQuantum());
         getIndex = readReg32(&(pmotor->inGetIndex));
         putIndex = readReg32(&(pmotor->inPutIndex));
         flushTime++;
-        if (flushTime == 100 ) {
-        	Debug(1, "%s:%s:%s: unable to flush more than 100 strings\n", driverName, functionName, portName);
-        	return asynError;
-        }
     }
 
     putIndex = readReg32(&(pmotor->outPutIndex));
@@ -410,38 +458,42 @@ asynStatus omsMAXv::sendOnly(const char *outputBuff)
 
     writeReg32(&(pmotor->outPutIndex), putIndex);	/* Message Sent */
 
-    int count = 0, prevdeltaIndex = 0, index = 0;
-    int maxcount = (int)(0.1 / epicsThreadSleepQuantum());
-    // skip busy-waiting for small epicsThreadSleepQuantum
-    if (epicsThreadSleepQuantum() <= 0.01) index = 100;
+    int count=0, prevdeltaIndex =0;
     putIndex = readReg32(&(pmotor->outPutIndex));
     getIndex = readReg32(&(pmotor->outGetIndex));
     int deltaIndex = ((epicsUInt16)putIndex) - ((epicsUInt16)getIndex);
-    while ((deltaIndex != 0) && (count <= maxcount))
+    int index = 0;
+    while (deltaIndex != 0)
     {
         putIndex = readReg32(&(pmotor->outPutIndex));
         getIndex = readReg32(&(pmotor->outGetIndex));
         deltaIndex  = ((epicsUInt16)putIndex) - ((epicsUInt16)getIndex);
         //  do busy-waiting but not more than 100 times
+        index = 0;
         while ((index < 100) && (deltaIndex != 0)){
             putIndex = readReg32(&(pmotor->outPutIndex));
             getIndex = readReg32(&(pmotor->outGetIndex));
             deltaIndex  = ((epicsUInt16)putIndex) - ((epicsUInt16)getIndex);
             ++index;
         }
-        if ((index >= 100) && (deltaIndex != 0)) epicsThreadSleep(timeout);
+        //  epicsThreadSleepQuantum => 0.02s for RTEMS
+        if ((index >= 100) && (deltaIndex != 0)) epicsThreadSleep(epicsThreadSleepQuantum());
         if (deltaIndex == prevdeltaIndex)
             ++count;
         else
-            count = 0;
+            count =0;
+        if (count > 10) break;
         prevdeltaIndex = deltaIndex;
     };
+    Debug(32, "%s:%s:%s: Waited %d loops\n", driverName, functionName, portName, index);
 
-    if (deltaIndex != 0) {
+//	printf("\nsend (%d,%d): %s",pmotor->outPutIndex,pmotor->outGetIndex,outputBuff);
+
+/*    if (deltaIndex != 0) {
         Debug(1, "%s:%s:%s: Timeout\n", driverName, functionName, portName);
         return asynTimeout;
     }
-
+*/
     Debug(64, "omsMAXv::send: done\n");
 
     return asynSuccess;
@@ -449,33 +501,39 @@ asynStatus omsMAXv::sendOnly(const char *outputBuff)
 /**
  * read just one line of input
  */
-asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigned int inputSize)
+asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigned int inputSize, size_t *nRead)
 {
-    static const char* functionName = "sendReceive";
+#ifdef DEBUG
+    const char* functionName = "sendReceive";
+#endif
 
     STATUS1 flag1;
-    epicsUInt16 getIndex, putIndex;
+    epicsUInt32 getIndex, putIndex;
     size_t bufsize;
     size_t usedSpace = 0;
     char *start, *end;
-    int itera = 0;
+    int itera;
     asynStatus status;
 
     if (!enabled) return asynError;
 
     status = sendOnly(outputBuff);
+	
+//	printf("buffer (%d,%d):\n,%s\n",pmotor->inGetIndex,pmotor->inPutIndex,pmotor->inBuffer);
+
+
     if (status != asynSuccess) return status;
 
-    if (inputSize <= 0) return status;
+     if (inputSize <= 0) return status;
+     *inputBuff = '\0';
 
-    *inputBuff = '\0';
-
+    Debug(64, "omsMAXv::sendReceive: receiving\n");
+    itera = 0;
     double time = 0.0;
-    double timeout = 0.1;
-    // skip busy-waiting for small epicsThreadSleepQuantum
-    if (epicsThreadSleepQuantum() <= 0.01) itera = 2001;
+    double timeout = 0.021;
+
     flag1.All = readReg32(&(pmotor->status1_flag.All));
-    while ((flag1.Bits.text_response == 0) && (time < timeout)){
+    while (((flag1.All & 0x02000000) == 0) && (time < timeout)){
         Debug(32, "%s:%s:%s: Waiting for reponse, itera:%d\n",
                 driverName, functionName, portName, itera);
         //  busy-waiting but not more than 2000 times
@@ -483,32 +541,32 @@ asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigne
             time += epicsThreadSleepQuantum();
             epicsThreadSleep(epicsThreadSleepQuantum());
         }
-        flag1.All = readReg32(&(pmotor->status1_flag.All));
         itera++;
+        flag1.All = readReg32(&(pmotor->status1_flag.All));
     }
 
     flag1.All = readReg32(&(pmotor->status1_flag.All));
-    if (flag1.Bits.text_response == 0)
+    if ((flag1.All & 0x02000000) == 0)
     {
-        Debug(1, "%s:%s:%s: Timeout occurred , %s\n",
-        		driverName, functionName, portName, outputBuff);
+        Debug(1, "Timeout occurred in recv_mess, %s\n", outputBuff);
         return asynTimeout;
     }
 
     getIndex = readReg32(&(pmotor->inGetIndex));
     putIndex = readReg32(&(pmotor->inPutIndex));
     bufsize  = putIndex - getIndex;
-    start  = (char *) &pmotor->inBuffer[getIndex];
-    end    = (char *) &pmotor->inBuffer[putIndex];
+    start  = (char *) &(pmotor->inBuffer[getIndex]);
+    end    = (char *) &(pmotor->inBuffer[putIndex]);
 
-    if (start < end) {   /* Test for message wraparound in buffer. */
-    	usedSpace = MIN(bufsize, inputSize);
+    if (start < end) 
+    {   /* Test for message wraparound in buffer. */
+        usedSpace = MIN(bufsize, inputSize);
         readRegMem(inputBuff, start, usedSpace);
     }
     else
     {
         bufsize += BUFFER_SIZE;
-        size_t firstPart = ((char *) &pmotor->inBuffer[BUFFER_SIZE]) - start;
+        size_t firstPart = ((char *) &(pmotor->inBuffer[BUFFER_SIZE])) - start;
 
         usedSpace = MIN(firstPart, inputSize);
         readRegMem(inputBuff, start, usedSpace);
@@ -518,6 +576,7 @@ asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigne
     }
 
     inputBuff[usedSpace - 1]= '\0';
+    *nRead=usedSpace-1;
 
     getIndex += bufsize;
     if (getIndex >= BUFFER_SIZE)
@@ -527,11 +586,10 @@ asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigne
     while (getIndex != putIndex)
     {
         epicsUInt8 t_inBuff = readReg8(&(pmotor->inBuffer[getIndex]));
-        Debug(2, "readbuf(): flushed - %d\n", pmotor->inBuffer[getIndex]);
+        Debug(2, "readbuf(): flushed - %d\n", t_inBuff);
         if (++getIndex > BUFFER_SIZE)
             getIndex = 0;
     }
-    //pmotor->status1_flag.Bits.text_response = 0;
     flag1.All = readReg32(&(pmotor->status1_flag.All));
     writeReg32(&(pmotor->status1_flag.All), (flag1.All & 0xfdffffff));
 
@@ -542,6 +600,133 @@ asynStatus omsMAXv::sendReceive(const char *outputBuff, char *inputBuff, unsigne
 
     Debug(16, "omsMAXv::sendReceive: received %s\n", inputBuff);
     return asynSuccess;
+}
+
+asynStatus omsMAXv::getRTposition()
+{
+        const char* functionName = "getRTposition";
+        epicsUInt8 buff_size=55;	
+	int axis, idx;
+	int read=0, read_fl[8]={0,0,0,0,0,0,0,0};
+
+        epicsUInt8 PutIndex = readReg8(&(pmotor->rtpcPutIndex));
+        epicsUInt8 GetIndex = readReg8(&(pmotor->rtpcGetIndex));
+
+	if (GetIndex > buff_size) { 
+                errlogPrintf("%s:%s:%s: GetIndex (%d) out of bounds (0 - 55)\n",
+                              driverName, functionName, portName, GetIndex);
+	}
+
+	if (PutIndex > buff_size) { 
+		errlogPrintf("%s:%s:%s: PutIndex (%d) out of bounds (0 - 55)\n",
+                              driverName, functionName, portName, PutIndex);
+		pRT->status=asynError;
+		return pRT->status;
+	}
+
+        if ( PutIndex >= GetIndex ) {read = (int) ( PutIndex - GetIndex); }
+		else {read = (int) (buff_size - GetIndex + PutIndex);}
+
+/* Temp fix
+	if ( read  != numAxes ){
+	    errlogPrintf("%s:%s:%s:  Read %d entries (PI=%d, GI=%d)\n",
+                              driverName, functionName, portName, read,PutIndex,GetIndex);
+	}
+*/
+
+	epicsUInt16 t_ax_hm, t_encoderMSB, t_encoderLSB;
+//	for (int i=0;i<numAxes;i++){
+	for (int i=0;i<read;i++){
+
+		idx=PutIndex - numAxes + i;
+		if (idx<0){idx =idx + buff_size;}
+		
+		t_ax_hm = readReg16(&(pmotor->rtpcTblEntry[idx].All[2]));
+		axis=(int) t_ax_hm>>8;
+		read_fl[axis] = 1;
+		t_encoderMSB = readReg16(&(pmotor->rtpcTblEntry[idx].All[0]));	// RTposition.encoderMSB
+		t_encoderLSB = readReg16(&(pmotor->rtpcTblEntry[idx].All[1]));	// RTposition.encoderLSB
+		pRT->encPos[axis] = (epicsInt32) t_encoderMSB<<16 | (epicsInt32) t_encoderLSB;
+
+	}
+        for (int i=0; i<numAxes;i++){
+		if(read_fl[i] == 0){
+		  pRT->encPos[i] = (epicsInt32) 0;
+		}
+        }
+	writeReg8(&(pmotor->rtpcGetIndex), PutIndex);
+/*        
+	for (idx=0;idx<numAxes;idx++){read=+read_fl[idx];}
+
+	if (read == numAxes) {pRT->status = asynSuccess;}
+		else {pRT->status = asynError;}
+*/
+	return pRT->status;
+}
+
+asynStatus omsMAXv::flushQueues()
+{
+  asynStatus status = asynSuccess;
+  directCommand cmd = KILL_ALL_MOTION;
+  writeReg32(&(pmotor->direct_cmnd_mbox), (epicsUInt32)cmd);
+  return status;
+}
+
+asynStatus omsMAXv::readInt32Array(asynUser *pasynUser, epicsInt32 *value,size_t nElements, size_t *nIn)
+{
+    int function = pasynUser->reason;
+    static const char *functionName = "readInt32Array";
+
+    if (function == RTposition){
+       getRTposition();
+       for (int i=0;i<nElements;i++) {
+		value[i]=pRT->encPos[i];
+		*nIn=nElements;
+       }
+       return pRT->status;
+    } else {
+	asynPrint(pasynUser, ASYN_TRACE_ERROR, 
+      "%s:%s error, function %d not found\n", 
+      driverName, functionName, function);
+
+	return asynError;
+   }
+}
+
+asynStatus omsMAXv::startRTPoller()
+{
+    char threadName[20];
+
+    epicsSnprintf(threadName, sizeof(threadName), "omsRTPoller-%d", cardNo);
+    this->RTpositionThread = epicsThreadCreate(threadName,
+            priority, stackSize,
+            (EPICSTHREADFUNC) &omsMAXv::callRTPoller, (void *) this);
+
+    return asynSuccess;
+
+}
+
+void omsMAXv::callRTPoller(void *drvPvt)
+{
+    omsMAXv *pController = (omsMAXv*)drvPvt;
+    pController->omsRTPoller();
+}
+
+void omsMAXv::omsRTPoller()
+{
+
+   findParam("RT_POSITIONS",&RTposition);
+
+    while(1) {
+
+	epicsEventWait(pRT->pollRTEventId_);
+
+        getRTposition();
+
+	doCallbacksInt32Array(pRT->encPos,numAxes, RTposition, 0);
+
+    }
+
 }
 
 
@@ -575,7 +760,7 @@ void omsMAXv::motorIsrSetup(volatile unsigned int vector, volatile epicsUInt8 le
     status1_irq.Bits.cmndError = 1;
 
     writeReg32(&(pmotor->status1_irq_enable.All), status1_irq.All);   /* Enable interrupts. */
-    writeReg32(&(pmotor->status2_irq_enable), 0x0);
+    writeReg32(&(pmotor->status2_irq_enable), 0x100);
 
     Debug(64, "omsMAXv::isrSetup: done\n");
     return;
@@ -654,8 +839,10 @@ extern "C" int omsMAXvConfig(
            int idlePollPeriod,        /* Time to poll (msec) when an axis is idle. 0 for no polling */
            const char *initString)    /* Init String sent to card */
 {
-    omsMAXv *pController = new omsMAXv(portName, numAxes, cardNo, initString, 0, 0, 0);
+    omsMAXv *pController = new omsMAXv(portName, numAxes, cardNo, initString, 0, 0, OMS_MAXV_PARAMS_COUNT);
+
     pController->startPoller((double)movingPollPeriod, (double)idlePollPeriod, 10);
+    pController->startRTPoller();
     return 0;
 }
 
@@ -679,8 +866,10 @@ extern "C" int omsMAXvConfig2(
            const char *initString)    /* Init String sent to card */
 {
     omsMAXv *pController = new omsMAXv(portName, numAxes, slotNo, initString, priority,
-                                          stackSize, addrs, vector, int_level, addr_type, 0);
+                                          stackSize, addrs, vector, int_level, addr_type, OMS_MAXV_PARAMS_COUNT);
+
     pController->startPoller((double)movingPollPeriod, (double)idlePollPeriod, 10);
+    pController->startRTPoller();
     return 0;
 }
 

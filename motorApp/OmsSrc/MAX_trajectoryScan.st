@@ -21,19 +21,14 @@ program MAX_trajectoryScan("P=13IDC:,R=traj1,M1=M1,M2=M2,M3=M3,M4=M4,M5=M5,M6=M6
 %% #include <ctype.h>
 %% #include <stdio.h>
 %% #include <math.h>
-%% #include <time.h>
 %% #include <epicsString.h>
-%% #include <epicsStdio.h>
 %% #include <asynOctetSyncIO.h>
-
-#include <seq_release.h> /* definition of MAGIC */
-#define VERSION_INT(MAJ,MIN) ((MAJ)*1000000+(MIN)*1000)
-#define LT_SEQ_VERSION(MAJ,MIN) ((MAGIC) < VERSION_INT(MAJ,MIN))
 
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define MIN(a,b) ((a) > (b) ? (b) : (a))
 #define NINT(f)  (int)((f)>0 ? (f)+0.5 : (f)-0.5)
 
+#define DEBUG_VA 10
 /* This program must be compiled with the recursive option */
 option +r;
 
@@ -44,10 +39,8 @@ option +r;
  * uses MAX_AXES*MAX_ELEMENTS*8 bytes in this SNL program (up to 128KB).
  * Similar memory will be required for the records in the database.
  * (Note that currently MAX_AXES is fixed at 8, in trajectoryScan.h.)
- * MAX_ELEMENTS_P2 = MAX_ELEMENTS+2 is needed for accel/decel
  */
 #define MAX_ELEMENTS 1000
-#define MAX_ELEMENTS_P2 1002
 
 /* Maximum # of output pulses.  For now, we emit a pulse at the beginning of
  * every trajectory element.
@@ -84,6 +77,8 @@ option +r;
  */
 #define USE_ASYN 0
 
+#define USE_SPLINE 0
+
 #if USE_ASYN
 #else
 int cardNumber;
@@ -101,7 +96,6 @@ int cardNumber;
  */
 %%extern int MAXV_recv_mess(int cardNumber, char *message, int amount);
 
-%%extern int MAXV_send_recv_mess(int cardNumber, char const *command, char *name, char *message, int amount);
 %%extern int MAXV_getPositions(int card, epicsInt32 *positions, int nPositions);
 #endif
 
@@ -128,10 +122,6 @@ int nextra;
 int npoints;
 double dtime;
 double dpos;
-double accelDist[MAX_AXES];
-double decelDist[MAX_AXES];
-%%double aDist;
-%%double dDist;
 double posActual;
 double posTheory;
 double expectedTime;
@@ -166,39 +156,34 @@ unsigned long startTime;
 %% static int writeOnly(SS_ID ssId, struct UserVar *pVar, char *command);
 %% static int writeRead(SS_ID ssId, struct UserVar *pVar, char *command, char *reply);
 %% static int getMotorPositions(SS_ID ssId, struct UserVar *pVar, double *pos, epicsInt32 *raw, double *dtime);
+%% static int getMotorPositionsRB(SS_ID ssId, struct UserVar *pVar, double *pos, epicsInt32 *rawP, int *rawV, int *rawA, double *dtime);
 %% static int getMotorMoving(SS_ID ssId, struct UserVar *pVar, int movingMask);
 %% static int getEpicsMotorMoving(SS_ID ssId, struct UserVar *pVar);
 %% static int waitEpicsMotors(SS_ID ssId, struct UserVar *pVar);
-%% static int buildTrajectory(SS_ID ssId, struct UserVar *pVar, double *realTimeTrajectory,
-%%	double *motorTrajectory, int epicsMotorDir, int moveMode, int npoints, double motorOffset,
-%%	double motorResolution, double motorVmin, int *position, int *velocity, int *acceleration,
-%%	double *accelDist, double *decelDist);
+%% static int buildTrajectory(SS_ID ssId, struct UserVar *pVar, double *timeTrajectory,
+%%	double *motorTrajectory, int epicsMotorDir, int moveMode, int npoints, int npulses, double motorOffset,
+%%	double motorResolution, int *position, int *velocity, int *acceleration);
 %% static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode);
 %% static int getStarted(SS_ID ssId, struct UserVar *pVar);
 %% static int userToRaw(double user, double off, int dir, double res);
 %% static double rawToUser(int raw, double off, int dir, double res);
 
-int position[MAX_AXES][MAX_ELEMENTS_P2];
-int velocity[MAX_AXES][MAX_ELEMENTS_P2];
-int acceleration[MAX_AXES][MAX_ELEMENTS_P2];
-/* if we're adding accel/decel points, we need a copy of realTimeTrajectory we can modify. */
-double realTimeTrajectoryAccelDecel[MAX_ELEMENTS_P2];
-double *rttraj;
+/* Numerical Recipes spline routines */
+#if USE_SPLINE
+%% static int spline(double *x, double *y, int n, double *y2);
+%% static int splint(double *xa, double *ya, int n, double x, double *y);
+#endif
 
+int position[MAX_AXES][MAX_ELEMENTS];
+int velocity[MAX_AXES][MAX_ELEMENTS];
+int acceleration[MAX_AXES][MAX_ELEMENTS];
+double motorStart[MAX_AXES];
 int motorStartRaw[MAX_AXES];
-double motorEnd[MAX_AXES]; 
 double dbuf[MAX_PULSES];
 
 /* variables for constructing trajectory commands */
 int movingMask;
 int waitingForTrigger;
-
-/* temporary variables to hold mav speed and acceleration for a motor */
-double vmax;
-double amax;
-
-int card;
-int signal;
 
 ss maxTrajectoryScan {
 
@@ -244,32 +229,6 @@ ss maxTrajectoryScan {
 				pvAssign(epicsMotorLLM[i], motorName);
 				pvMonitor(epicsMotorLLM[i]);
 
-				sprintf(motorName, "%s%s.VELO", macValueGet("P"), macValueGet(macroBuf));
-				pvAssign(epicsMotorVELO[i], motorName);
-				pvMonitor(epicsMotorVELO[i]);
-
-				sprintf(motorName, "%s%s.VMAX", macValueGet("P"), macValueGet(macroBuf));
-				pvAssign(epicsMotorVMAX[i], motorName);
-				pvMonitor(epicsMotorVMAX[i]);
-
-				sprintf(motorName, "%s%s.VBAS", macValueGet("P"), macValueGet(macroBuf));
-				pvAssign(epicsMotorVMIN[i], motorName);
-				pvMonitor(epicsMotorVMIN[i]);
-
-				sprintf(motorName, "%s%s.ACCL", macValueGet("P"), macValueGet(macroBuf));
-				pvAssign(epicsMotorACCL[i], motorName);
-				pvMonitor(epicsMotorACCL[i]);
-
-				sprintf(motorName, "%s%s.OUT", macValueGet("P"), macValueGet(macroBuf));
-				pvAssign(epicsMotorOUT[i], motorName);
-				pvGet(epicsMotorOUT[i]);
-
-				sscanf(epicsMotorOUT[i], "#C%d S%d", &card, &signal);
-				if (signal != i) {
-					printf("MAX_trajectoryScan: motor %d has signal %d (must be same)\n", i, signal);
-					initStatus = STATUS_FAILURE;
-				}
-
 				if (cardNumber == -2) {
 					cardNumber = epicsMotorCard[i];
 				} else {
@@ -299,9 +258,6 @@ ss maxTrajectoryScan {
 			efClear(readbackMon);
 			efClear(nelementsMon);
 			efClear(motorMDVSMon); /* we don't use this */
-			efClear(moveModeMon);
-
-			moveModePrev = moveMode;
 			if (initStatus == STATUS_UNDEFINED) initStatus = STATUS_SUCCESS;
 		} state monitor_inputs
 	}
@@ -328,18 +284,6 @@ ss maxTrajectoryScan {
 		when(efTestAndClear(motorMDVSMon)) {
 			/* We don't use this. */
 		} state monitor_inputs
-
-		when (efTestAndClear(moveModeMon)) {
-			/* We don't support hybrid mode (yet?). */
-			if (moveMode == MOVE_MODE_HYBRID) {
-				moveMode = moveModePrev;
-				pvPut(moveMode);
-			} else {
-				moveModePrev = moveMode;
-			}
-			buildStatus = STATUS_UNDEFINED;
-			pvPut(buildStatus);
-		} state monitor_inputs
 	}
 
 	/* Build trajectory */
@@ -350,18 +294,16 @@ ss maxTrajectoryScan {
 			pvPut(buildState);
 			buildStatus=STATUS_UNDEFINED;
 			pvPut(buildStatus);
-			epicsSnprintf(buildMessage, MSGSIZE, "Building...");
+			sprintf(buildMessage, "Building...");
 			pvPut(buildMessage);
 
 
 			buildStatus = STATUS_SUCCESS; /* presume we'll be successful */
 			/* Initialize new trajectory */
 			/* If time mode is TIME_MODE_TOTAL then construct timeTrajectory and post it */
-			/* Note that timeTrajectory[i] is the time to go from motorTrajectory[i] to motorTrajectory[i+1] */
 			if (timeMode == TIME_MODE_TOTAL) {
-				dtime = time_PV/(nelements-1);
-				for (i=0; i<nelements-1; i++) timeTrajectory[i] = dtime;
-				for (i=nelements-1; i<MAX_ELEMENTS; i++) timeTrajectory[i] = 0;
+				dtime = time/(nelements-1);
+				for (i=0; i<nelements; i++) timeTrajectory[i] = dtime;
 				pvPut(timeTrajectory);
 			}
 
@@ -374,7 +316,7 @@ ss maxTrajectoryScan {
 			/* calculate time at which motor should reach each trajectory point */
 			realTimeTrajectory[0] = 0.;
 			for (i=1; i<npoints; i++) {
-				realTimeTrajectory[i] = realTimeTrajectory[i-1] + timeTrajectory[i-1];
+				realTimeTrajectory[i] = realTimeTrajectory[i-1] + timeTrajectory[i];
 			}
 			for (i=0; i<npoints; i++) realTimeTrajectory[i] *= timeScale;
 
@@ -382,117 +324,44 @@ ss maxTrajectoryScan {
 			for (; i<MAX_ELEMENTS; i++) realTimeTrajectory[i] = realTimeTrajectory[i-1];
 			pvPut(realTimeTrajectory);
 
-			/* Make a copy we can modify to add accel/decel points */
-			realTimeTrajectoryAccelDecel[0] = 0;
-			for (i=1; i<npoints+1; i++) realTimeTrajectoryAccelDecel[i] = realTimeTrajectory[i-1] + accel;
-			realTimeTrajectoryAccelDecel[npoints+1] = realTimeTrajectoryAccelDecel[npoints] + accel; /* decel time */
 
 			/* Calculate velocities and accelerations for trajectories. */
 			for (j=0; j<MAX_AXES; j++) {
 				if (moveAxis[j]) {
-					rttraj = realTimeTrajectoryAccelDecel;
-					if (addAccelDecel) rttraj = realTimeTrajectoryAccelDecel;
-					%%buildTrajectory(ssId, pVar, pVar->rttraj, pVar->motorTrajectory[pVar->j],
-					%%	pVar->epicsMotorDir[pVar->j], pVar->moveMode, pVar->npoints,
-					%%	pVar->epicsMotorOff[pVar->j], pVar->epicsMotorMres[pVar->j], pVar->epicsMotorVMIN[pVar->j],
-					%%	pVar->position[pVar->j], pVar->velocity[pVar->j], pVar->acceleration[pVar->j],
-					%%	&aDist, &dDist);
-					%%pVar->accelDist[pVar->j] = aDist;
-					%%pVar->decelDist[pVar->j] = dDist;
+					%%buildTrajectory(ssId, pVar, pVar->realTimeTrajectory, pVar->motorTrajectory[pVar->j],
+					%%	pVar->epicsMotorDir[pVar->j], pVar->moveMode, pVar->npoints, pVar->npulses,
+					%%	pVar->epicsMotorOff[pVar->j], pVar->epicsMotorMres[pVar->j],
+					%%	pVar->position[pVar->j], pVar->velocity[pVar->j], pVar->acceleration[pVar->j]);
 				}
 			}
 
 			/* Compute expected time for trajectory.  This includes timeScale factor. */
-			if (addAccelDecel) {
-				/* Accel/decel segments are not scaled with timeScale factor. */
-				expectedTime = realTimeTrajectoryAccelDecel[npoints+1];
-			} else {
-				expectedTime = realTimeTrajectory[npoints-1];
-			}
+			expectedTime = realTimeTrajectory[npoints-1];
 
-			/* Check trajectories against motor soft limits */
+			/* This might be a good time to check trajectories against motor soft limits */
 			limitViolation = 0;
 			for (j=0; j<numAxes && !limitViolation; j++) {
 				if (moveAxis[j]) {
-					vmax = epicsMotorVMAX[j];
-					if (fabs(vmax) < .001) vmax = epicsMotorVELO[j];
-					amax = vmax/epicsMotorACCL[j];
-					motorMVA[j] = 0.;
-					motorMAA[j] = 0.;
-					motorMVE[j] = 0;
-					motorMAE[j] = 0;
 					for (k=0; k<npoints && !limitViolation; k++) {
 						posActual = motorTrajectory[j][k];
 						if (moveMode != MOVE_MODE_ABSOLUTE) posActual += epicsMotorPos[j];
-						limitViolation |= (posActual > epicsMotorHLM[j]) || (posActual < epicsMotorLLM[j]);
+						limitViolation = (posActual > epicsMotorHLM[j]) || (posActual < epicsMotorLLM[j]);
                 		if (limitViolation) {
-							epicsSnprintf(buildMessage, MSGSIZE, "Limit: m%d at pt. %d (%f)", j+1, k+1, posActual);
-						}
-						if (velocity[j][k]*epicsMotorMres[j] > vmax) {
-							limitViolation |= 1;
-							epicsSnprintf(buildMessage, MSGSIZE, "V limit: m%d at pt. %d (%f)", j+1, k+1,
-								velocity[j][k]*epicsMotorMres[j]);
-						}
-						if (fabs(acceleration[j][k]*epicsMotorMres[j]) > amax) {
-							limitViolation |= 1;
-							epicsSnprintf(buildMessage, MSGSIZE, "A limit: m%d at pt. %d (%f)", j+1, k+1,
-								acceleration[j][k]*epicsMotorMres[j]);
-						}
-						if (fabs(velocity[j][k]) > motorMVA[j]) {
-							motorMVA[j] = velocity[j][k];
-							motorMVE[j] = k;
-						}
-						if (fabs(acceleration[j][k]) > motorMAA[j]) {
-							motorMAA[j] = acceleration[j][k];
-							motorMAE[j] = k;
+							sprintf(buildMessage, "Limit: motor %d at pt. %d (%f)", j+1, k+1, posActual);
 						}
 					}
-					motorMVA[j] *= epicsMotorMres[j];
-					motorMAA[j] *= epicsMotorMres[j];
-					pvPut(motorMVA[j]);
-					pvPut(motorMAA[j]);
-					pvPut(motorMVE[j]);
-					pvPut(motorMAE[j]);
 				}
 			}
 
 			if (limitViolation) {
 				buildStatus = STATUS_FAILURE;
 			}
-
-			/* Post start positions.  For relative scans, positions will be recalculated at exec time. */
-			for (j=0; j<numAxes; j++) {
-				if (moveAxis[j]) {
-					if (moveMode == MOVE_MODE_ABSOLUTE) {
-						motorStart[j] = motorTrajectory[j][0];
-						motorEnd[j] = motorTrajectory[j][npoints-1];
-					} else {
-						motorStart[j] = epicsMotorPos[j];
-						motorEnd[j] = motorStart[j] + (motorTrajectory[j][npoints-1] - motorTrajectory[j][0]);
-					}
-					if (addAccelDecel) {
-						motorStart[j] -= accelDist[j];
-						motorEnd[j] += decelDist[j];
-					}
-					pvPut(motorStart[j]);
-				}
-			}
-
-			/* Post current positions. */
-			%%getMotorPositions(ssId, pVar, pVar->motorCurrent, pVar->motorCurrentRaw, &(pVar->dtime));
-			for (j=0; j<numAxes; j++) {
-				if (moveAxis[j]) {
-					pvPut(motorCurrent[j]);
-				}
-			}
-
 #if LOAD_EARLY
 			if ((buildStatus == STATUS_SUCCESS) && (moveMode != MOVE_MODE_ABSOLUTE)) {
 				/* We can load trajectory into controller, because we won't have to move to initial position. */
 				%%loadTrajectory(ssId, pVar, pVar->simMode);
 			}
 #endif
-
 			/* Set status and message string */
 
 			/* Clear busy flag, post status */
@@ -505,7 +374,7 @@ ss maxTrajectoryScan {
 			build=0;
 			pvPut(build);
 			if (buildStatus == STATUS_SUCCESS) {
-				epicsSnprintf(buildMessage, MSGSIZE, "Done");
+				sprintf(buildMessage, "Done");
 				pvPut(buildMessage);
 			}
 		} state monitor_inputs
@@ -529,31 +398,12 @@ ss maxTrajectoryScan {
 			}
 			currPulse = 0;
 			/* Get the initial positions of the motors */
-			for (j=0; j<numAxes; j++) motorStart[j] = epicsMotorPos[j];
-
-			/* Recalculate start/end, because for non-absolute mode, they depend on current motor position. */
-			for (j=0; j<numAxes; j++) {
-				if (moveAxis[j]) {
-					if (moveMode == MOVE_MODE_ABSOLUTE) {
-						motorStart[j] = motorTrajectory[j][0];
-						motorEnd[j] = motorTrajectory[j][npoints-1];
-					} else {
-						motorStart[j] = epicsMotorPos[j];
-						motorEnd[j] = motorStart[j] + (motorTrajectory[j][npoints-1] - motorTrajectory[j][0]);
-					}
-					if (addAccelDecel) {
-						motorStart[j] -= accelDist[j];
-						motorEnd[j] += decelDist[j];
-					}
-					pvPut(motorStart[j]);
-				}
-			}
-
+			for (j=0; j<numAxes; j++) initialPos[j] = epicsMotorPos[j];
 			/* Move to start position if required */
-			if ((moveMode == MOVE_MODE_ABSOLUTE) || addAccelDecel) {
+			if (moveMode == MOVE_MODE_ABSOLUTE) {
 				for (j=0; j<numAxes; j++) {
 					if (moveAxis[j]) {
-						epicsMotorPos[j] = motorStart[j];
+						epicsMotorPos[j] = motorTrajectory[j][0];
 						pvPut(epicsMotorPos[j]);
 					}
 				}
@@ -607,26 +457,8 @@ ss maxTrajectoryScan {
 
 		when (execStatus == STATUS_ABORT) {
 			/* The trajectory_abort state set has detected an abort. It has
-			 * already posted the status and message.  Tell the motors where
-			 * they are. */
-			if (debugLevel) printf("\nabort\n");
-			pvPut(elapsedTime);
-			pvPut(execStatus);
-			pvPut(execMessage);
-			/* Get the current motor positions, post them */
-			%%getMotorPositions(ssId, pVar, pVar->motorCurrent, pVar->motorCurrentRaw, &(pVar->dtime));
-			for (j=0; j<numAxes; j++) {
-				if (moveAxis[j]) {
-					pvPut(motorCurrent[j]);
-					epicsMotorPos[j] = motorCurrent[j];
-					/* We don't expect motor to move, because it's already at its current position.
-					 * but the motor record wasn't involved in the trajectory, so its display is stale.
-					 * This gets the motor record to update its display with the current position. */
-					pvPut(epicsMotorPos[j]);
-				}
-			}
-			%%waitEpicsMotors(ssId, pVar);
-			if (debugLevel) printf("\n...abort done\n");
+			 * already posted the status and message.  Don't execute flyback
+			 * return to top */
 			execState = EXECUTE_STATE_DONE;
 			pvPut(execState);
 			/* Clear execute command, post.  This is a "busy" record, don't
@@ -651,7 +483,11 @@ ss maxTrajectoryScan {
 			
 			if (!waitingForTrigger) {
 				/* Get the current motor positions, post them */
-				%%getMotorPositions(ssId, pVar, pVar->motorCurrent, pVar->motorCurrentRaw, &(pVar->dtime));
+				if (debugLevel < DEBUG_VA) {
+					%%getMotorPositions(ssId, pVar, pVar->motorCurrent, pVar->motorCurrentRaw, &(pVar->dtime));
+				} else {
+					%%getMotorPositionsRB(ssId, pVar, pVar->motorCurrent, pVar->motorCurrentRaw, pVar->motorCurrentVRaw, pVar->motorCurrentARaw, &(pVar->dtime));
+				}
 				elapsedTime = dtime;
 	
 				doPoll = (dtime - lastPollTime) > POLL_INTERVAL;
@@ -665,16 +501,22 @@ ss maxTrajectoryScan {
 							motorError[j][currPulse] = dtime;
 							if (debugLevel >= 10) printf("wait_execute: motor %d: rb=%f, t=%f\n",
 								j, motorReadbacks[j][currPulse], motorError[j][currPulse]);
+							if (j==0 && (debugLevel >= DEBUG_VA)) {
+								motorReadbacks[j+1][currPulse] = motorCurrentRaw[j];
+								motorReadbacks[j+2][currPulse] = motorCurrentVRaw[j];
+								motorReadbacks[j+3][currPulse] = motorCurrentARaw[j];
+								motorReadbacks[j+4][currPulse] = dtime;
+							}
 						}
 						/*** compare current time, position with desired trajectory ***/
-						/* bracket dtime in the interval [realTimeTrajectoryAccelDecel[i], realTimeTrajectoryAccelDecel[i+1]] */
-						for (i=lastRealTimePoint; (i<npoints-1) && (dtime>0.) && (dtime > realTimeTrajectoryAccelDecel[i]); i++);
+						/* bracket dtime in the interval [realTimeTrajectory[i], realTimeTrajectory[i+1]] */
+						for (i=lastRealTimePoint; (i<npoints-1) && (dtime>0.) && (dtime > realTimeTrajectory[i]); i++);
 						i--;
 						if (i<0) i = 0;
 						if (doPoll && (i > 2) && (i < npoints-2) && (overrideFactor >= .01) && (currPulse < MAX_PULSES-1)) {
-							if (debugLevel >= 10) printf("wait_execute: time=%f, i=%d, realTimeTrajectoryAccelDecel[i]=%f\n",
-								dtime, i, realTimeTrajectoryAccelDecel[i]);
-							frac = (dtime - realTimeTrajectoryAccelDecel[i]) / (realTimeTrajectoryAccelDecel[i+1] - realTimeTrajectoryAccelDecel[i]);
+							if (debugLevel >= 10) printf("wait_execute: time=%f, i=%d, realTimeTrajectory[i]=%f\n",
+								dtime, i, realTimeTrajectory[i]);
+							frac = (dtime - realTimeTrajectory[i]) / (realTimeTrajectory[i+1] - realTimeTrajectory[i]);
 							posTheory = motorTrajectory[j][i] + frac * (motorTrajectory[j][i+1] - motorTrajectory[j][i]);
 							if (moveMode != MOVE_MODE_ABSOLUTE) {
 								posTheory += motorStart[j];
@@ -687,7 +529,7 @@ ss maxTrajectoryScan {
 								(motorError[j][currPulse] - motorError[j][currPulse-1]);
 							/* change in speed needed to make up the position in a time equal to the length of the current
 							 * segment */
-							deltaV = dpos / (realTimeTrajectoryAccelDecel[i+1] - realTimeTrajectoryAccelDecel[i]);
+							deltaV = dpos / (realTimeTrajectory[i+1] - realTimeTrajectory[i]);
 							vO = (1-(deltaV/v)*overrideFactor) * 100;
 							%%pVar->vOverride = NINT(pVar->vO);
 							if (vOverride<80) vOverride=80;
@@ -750,19 +592,15 @@ ss maxTrajectoryScan {
 			pvPut(execMessage);
 			/* Get the current motor positions, post them */
 			%%getMotorPositions(ssId, pVar, pVar->motorCurrent, pVar->motorCurrentRaw, &(pVar->dtime));
+			for (j=0; j<numAxes; j++) pvPut(motorCurrent[j]);
 			for (j=0; j<numAxes; j++) {
 				if (moveAxis[j]) {
-					pvPut(motorCurrent[j]);
 					epicsMotorPos[j] = motorCurrent[j];
-					/* We don't expect motor to move, because it's already at its current position.
-					 * but the motor record wasn't involved in the trajectory, so its display is stale.
-					 * This gets the motor record to update its display with the current position. */
 					pvPut(epicsMotorPos[j]);
 				}
 			}
 			%%waitEpicsMotors(ssId, pVar);
 			if (debugLevel) printf("\n...flyback done\n");
-
 			execState = EXECUTE_STATE_DONE;
 			pvPut(execState);
 			/* Clear execute command, post.  This is a "busy" record, don't
@@ -780,8 +618,49 @@ ss maxTrajectoryScan {
 			pvPut(readState);
 			readStatus=STATUS_UNDEFINED;
 			pvPut(readStatus);
+#if 1
+			/* During trajectory execution, time and motor position were accumulated into
+			 * motorError[j] and motorReadbacks[j], respectively.  Interpolate motorReadbacks[j]
+			 * to get readbacks at the times in realTimeTrajectory, so they can be plotted
+			 * on the same axis with motorTrajectory[j].
+			 */
+            for (j=0; j<numAxes; j++) {
+				if (moveMode != MOVE_MODE_ABSOLUTE) {
+					for (k=0; k<=currPulse; k++) motorReadbacks[j][k] -= motorStart[j];
+				}
+				if (debugLevel >= 10) printf("state readback: motor %d\n", j);
+				for (k=0, i=0; k<npoints; k++) {
+					while ((motorError[j][i] < realTimeTrajectory[k]) && (i < MAX_PULSES-1)) i++;
+					if ((i>0) && (fabs(motorError[j][i] - motorError[j][i-1]) > 1e-6)) {
+						frac = (realTimeTrajectory[k] - motorError[j][i-1])/(motorError[j][i] - motorError[j][i-1]);
+						dbuf[k] = motorReadbacks[j][i-1] + frac * (motorReadbacks[j][i] - motorReadbacks[j][i-1]);
+						/*if (k==npoints-1) printf("interp: motorReadbacks[%d][%d]=%f\n", j, k, dbuf[k]);*/
+					} else {
+						dbuf[k] = motorReadbacks[j][i];
+						/*if (k==npoints-1) printf("copy: motorReadbacks[%d][%d]=%f\n", j, k, dbuf[k]);*/
+					}
+					if (debugLevel >= 10) printf("state readback: rb=%f, t=%f\n", dbuf[k], realTimeTrajectory[k]);
 
-            /* Post the readback arrays */
+				}
+				for (; k<MAX_PULSES; k++) dbuf[k] = 0.;
+
+				/* copy to motorReadbacks */
+				for (k=0; k<MAX_PULSES; k++) motorReadbacks[j][k] = dbuf[k];
+				/* calculate error, ignoring last (deceleration) point */
+				for (k=0; k<npoints-1; k++) {
+					motorError[j][k] =  motorReadbacks[j][k] - motorTrajectory[j][k];
+				}
+				for (; k<MAX_PULSES; k++) motorError[j][k] = motorError[j][k-1];
+			}
+			for (k=currPulse; k<MAX_PULSES; k++){
+				motorReadbacks[1][k] = motorReadbacks[1][k-1];
+				motorReadbacks[2][k] = motorReadbacks[2][k-1];
+				motorReadbacks[3][k] = motorReadbacks[3][k-1];
+				motorReadbacks[4][k] = motorReadbacks[4][k-1];
+			}
+#endif
+            /* Post the readback and error arrays */
+            /*for (j=0; j<numAxes; j++) {*/ 
             for (j=0; j<MAX_AXES; j++) {
                 pvPut(motorReadbacks[j]);
                 pvPut(motorError[j]);
@@ -800,7 +679,6 @@ ss maxTrajectoryScan {
 			pvPut(readback);
 		} state monitor_inputs
 	}
-
 }
 
 /* This state set simply monitors the abort input.  It is a separate state set
@@ -810,6 +688,10 @@ ss maxTrajectoryScan {
 ss trajectoryAbort {
 	state monitorAbort {
 		when (efTestAndClear(abortMon) && (abort==1)) {
+#if 0
+			sprintf(stringOut, "SA;"); /* Stop all motors, and flush all queues. */
+			%%writeOnly(ssId, pVar, pVar->stringOut);
+#else
 			for (j=0; j<MAX_AXES; j++) {
 				if (moveAxis[j]) {
 					sprintf(stringOut, "AM; VH[%d]1;", j+1);
@@ -826,6 +708,7 @@ ss trajectoryAbort {
 			strcat(stringOut, ";");
 			if (debugLevel) printf("abort: sending command '%s'\n", stringOut);
 			%%writeOnly(ssId, pVar, pVar->stringOut);
+#endif
 
 			execStatus = STATUS_ABORT;
 			pvPut(execStatus);
@@ -895,13 +778,10 @@ static int writeRead(SS_ID ssId, struct UserVar *pVar, char *command, char *repl
 							   strlen(buffer), reply, MAX_MESSAGE_STRING, 
 							   30.0, &nwrite, &nread, &eomReason);
 #else
-
-	/* status = (asynStatus) MAXV_send_mess(pVar->cardNumber, command, (char *) NULL);
-	 * status |= (asynStatus) MAXV_recv_mess(pVar->cardNumber, reply, 1);
-	 */
-	status = MAXV_send_recv_mess(pVar->cardNumber, command, (char *) NULL, reply, 1);
+	status = (asynStatus) MAXV_send_mess(pVar->cardNumber, command, (char *) NULL);
+	status |= (asynStatus) MAXV_recv_mess(pVar->cardNumber, reply, 1);
 #endif
-	if (pVar->debugLevel >= 2) {
+	if (pVar->debugLevel >= 5) {
 		printf("    writeRead:command='%s', reply='%s'\n", buffer, reply);
 	}
 	return(status);
@@ -914,6 +794,8 @@ static int getMotorPositions(SS_ID ssId, struct UserVar *pVar, double *pos, epic
     int j;
     int dir;
 	epicsTimeStamp currtime;
+	char vBuf[MAX_MESSAGE_STRING], aBuf[MAX_MESSAGE_STRING];
+	static char vcmd[10]="VRV[1];", acmd[10]="VRC[1];";
 
 	MAXV_getPositions(pVar->cardNumber, rawP, pVar->numAxes);
 
@@ -921,13 +803,68 @@ static int getMotorPositions(SS_ID ssId, struct UserVar *pVar, double *pos, epic
 	*dt = epicsTimeDiffInSeconds(&currtime, &eStartTime);
     for (j=0; j<pVar->numAxes; j++) {
         if (pVar->epicsMotorDir[j] == 0) dir=1; else dir=-1;
+        /*pos[j] = rawP[j]*dir*pVar->epicsMotorMres[j] + pVar->epicsMotorOff[j];*/
 		pos[j] = rawToUser(rawP[j], pVar->epicsMotorOff[j], dir, pVar->epicsMotorMres[j]);
     }
 
-	if (pVar->debugLevel >= 1) {
+	if ((pVar->execState == EXECUTE_STATE_EXECUTING) && (pVar->debugLevel >= 2)) {
+		if (pVar->debugLevel >= 3) {
+			printf("\n%6.3fs: ", *dt);
+	    	for (j=0; j<pVar->numAxes; j++) {
+				if (pVar->moveAxis[j]) {
+					vcmd[4] = (char)(j+1 + '0');
+					writeRead(ssId, pVar, vcmd, vBuf);
+					acmd[4] = (char)(j+1 + '0');
+					writeRead(ssId, pVar, acmd, aBuf);
+					printf("(%7d, %7.0f, %7.0f) ", rawP[j], atof(&(vBuf[1])), atof(&(aBuf[1])));
+				}
+			}
+		} else {
+			writeRead(ssId, pVar, "VRV[1];", vBuf);
+			writeRead(ssId, pVar, "VRC[1];", aBuf);
+			printf("\ndt=%6.3f, p=%7d, v=%7.0f, a=%7.0f",
+				*dt, rawP[0], atof(&(vBuf[1])), atof(&(aBuf[1])));
+		}
+		if (pVar->debugLevel >= 10) printf("\n");
+	} else if (pVar->debugLevel >= 1) {
 		printf("\ndt=%6.3f, p=%7d", *dt, rawP[0]);
 	}
 	epicsThreadSleep(READ_INTERVAL);
+	return(0);
+}
+
+/* getMotorPositions returns the positions of each motor, and maybe velocity and acceleration */
+static int getMotorPositionsRB(SS_ID ssId, struct UserVar *pVar, double *pos, epicsInt32 *rawP, int *rawV, int *rawA, double *dt)
+{
+    int j;
+    int dir;
+	epicsTimeStamp currtime;
+	char vBuf[MAX_MESSAGE_STRING], aBuf[MAX_MESSAGE_STRING];
+
+	MAXV_getPositions(pVar->cardNumber, rawP, pVar->numAxes);
+
+	epicsTimeGetCurrent(&currtime);
+	*dt = epicsTimeDiffInSeconds(&currtime, &eStartTime);
+
+    for (j=0; j<pVar->numAxes; j++) {
+        if (pVar->epicsMotorDir[j] == 0) dir=1; else dir=-1;
+        /*pos[j] = rawP[j]*dir*pVar->epicsMotorMres[j] + pVar->epicsMotorOff[j];*/
+		pos[j] = rawToUser(rawP[j], pVar->epicsMotorOff[j], dir, pVar->epicsMotorMres[j]);
+    }
+
+    /* Read the velocity and acceleration for task 1 */
+	if ((pVar->execState == EXECUTE_STATE_EXECUTING) && (pVar->debugLevel >= DEBUG_VA)) {
+		writeRead(ssId, pVar, "VRV[1];", vBuf);
+		writeRead(ssId, pVar, "VRC[1];", aBuf);
+		rawV[0] = atol(&(vBuf[1]));
+		rawA[0] = atol(&(aBuf[1]));
+		printf("getMotorPositionsRB: dt=%6.3f, p=%7d, v=%7d, a=%7d\n", *dt, rawP[0], rawV[0], rawA[0]);
+		if (pVar->debugLevel >= 10) printf("\n");
+	} else if (pVar->debugLevel >= 1) {
+		printf("getMotorPositionsRB: dt=%6.3f, p=%7d\n", *dt, rawP[0]);
+	}
+	epicsThreadSleep(READ_INTERVAL);
+
 	return(0);
 }
 
@@ -1031,47 +968,28 @@ static int waitEpicsMotors(SS_ID ssId, struct UserVar *pVar)
 /* Calculate velocities and accelerations suitable for MAX variable velocity contouring commands.
  * We're given x(t) in the form x[i], t[i].  We need to calculate v(x) and a(x) that will produce x(t).
  */
-volatile int MAXv_traj_quantized = 1;
-volatile int MAXv_traj_vmin = 0;
 
-double	y2[MAX_ELEMENTS_P2], v_out[MAX_ELEMENTS_P2], a_out[MAX_ELEMENTS_P2], calcMotorTrajectory[MAX_ELEMENTS_P2];
+double	y2[MAX_ELEMENTS], v_out[MAX_ELEMENTS], a_out[MAX_ELEMENTS], calcMotorTrajectory[MAX_ELEMENTS];
 static int buildTrajectory(SS_ID ssId, struct UserVar *pVar, double *realTimeTrajectory,
-	double *motorTrajectory, int epicsMotorDir, int moveMode, int npoints, double motorOffset,
-	double motorResolution, double motorVmin, int *position, int *velocity, int *acceleration,
-	double *accelDist, double *decelDist)
+	double *motorTrajectory, int epicsMotorDir, int moveMode, int npoints, int npulses, double motorOffset,
+	double motorResolution, int *position, int *velocity, int *acceleration)
 {
-
-	double dp, dt, v_ideal, v_lin, accel_p, accel_v, thisTime;
+	double dp, dt, v_ideal, v_lin, accel_p, accel_v, time;
+#if USE_SPLINE
+	double v_spline, delta, yy0, yy1;
+#endif
 	double x0;
 	int i, dir;
 
-	*accelDist = 0; /* init; these are used only if pVar->addAccelDecel */
-	*decelDist = 0;
-
-	if (pVar->addAccelDecel) {
-		dp = motorTrajectory[1] - motorTrajectory[0];
-		dt = realTimeTrajectory[2] - realTimeTrajectory[1];
-		*accelDist = (dp/dt * pVar->accel) / 2;
-		/* Average speed over last trajectory segment is the speed from which we want to decelerate to 0 speed. */
-		dp = motorTrajectory[npoints-1] - motorTrajectory[npoints-2];
-		dt = realTimeTrajectory[npoints] - realTimeTrajectory[npoints-1];
-		/* Note that accel_time == decel_time, but the distances are different. */
-		*decelDist = (dp/dt * pVar->accel) / 2;
-
-		/* Shift motorTrajectory forward by one element; prepend accel, append decel; restore before returning.
-		 * realTimeTrajectory was modified for us by caller. */
-		for (i=npoints; i>0; i--) {
-			motorTrajectory[i] = motorTrajectory[i-1];
-		}
-		motorTrajectory[0] = motorTrajectory[1] - *accelDist;
-		motorTrajectory[npoints+1] = motorTrajectory[npoints] + *decelDist;
-		npoints += 2;
-	}
+#if USE_SPLINE
+	/* prepare for spline interpolation of motor trajectory */
+	spline(realTimeTrajectory, motorTrajectory, npoints, y2);
+#endif
 
 	calcMotorTrajectory[0] = motorTrajectory[0];
 	v_out[0] = 0;
 	if (pVar->debugLevel >= 7) {
-		printf("\n###:%8s %8s %7s %8s %8s %8s %8s %8s\n",
+		printf("###:%8s %8s %7s %8s %8s %8s %8s %8s\n",
 			"pos", "calcPos", "dp", "t", "v_ideal", "accel_p", "accel_v", "accel_s");
 	}
 	for (i=1; i<npoints; i++) {
@@ -1086,42 +1004,35 @@ static int buildTrajectory(SS_ID ssId, struct UserVar *pVar, double *realTimeTra
 			v_lin = (motorTrajectory[i+1]-motorTrajectory[i-1])/(realTimeTrajectory[i+1]-realTimeTrajectory[i-1]);
 			v_ideal = v_lin;
 
+#if USE_SPLINE
+			/* spline interpolation of motor trajectory */
+			delta = (realTimeTrajectory[i+1] - realTimeTrajectory[i-1])/10.;
+			splint(realTimeTrajectory, motorTrajectory, npoints, realTimeTrajectory[i]-delta, &yy0);
+			splint(realTimeTrajectory, motorTrajectory, npoints, realTimeTrajectory[i]+delta, &yy1);
+			v_spline = (yy1-yy0)/(2*delta);
+			if (pVar->debugLevel >= 10) printf("v_lin=%f, v_spline=%f\n", v_lin, v_spline);
+			v_ideal = v_spline;
+#endif
+
 			/* the acceleration that will get us to the ideal velocity */
 			accel_v = (v_ideal - v_out[i-1])/dt;
 
 			/* compromise between desired position and ideal velocity */
 			a_out[i-1] = (accel_p + accel_v)/2;
-
 		} else {
 			v_ideal = 0.;
 			accel_v = (v_ideal - v_out[i-1])/dt;
-			a_out[i-1] = accel_v;
+			a_out[i-1] = accel_p;
 		}
 		if (pVar->debugLevel >= 7) {
 			printf("%3d:%8.2f %8.2f %7.2f %8.3f %8.3f %8.3f %8.3f %8.3f\n",
 				i, motorTrajectory[i-1], calcMotorTrajectory[i-1], dp, realTimeTrajectory[i-1], v_ideal, accel_p, accel_v, (y2[i-1]+y2[i])/2);
 		}
-		if (MAXv_traj_quantized) {
-			/* Motor acceleration is quantized.  Take effect into account by assuming nearest achievable acceleration. */
-			a_out[i-1] = motorResolution * NINT(a_out[i-1]/motorResolution);
-		}
 		v_out[i] = v_out[i-1] + a_out[i-1]*dt;
-		if (MAXv_traj_quantized) {
-			/* Motor speed is quantized.  Take effect into account by calculating nearest achievable speed. */
-			v_out[i] = motorResolution * NINT(v_out[i]/motorResolution);
-		}
-		if (MAXv_traj_vmin) {
-			/* Motor speed has lower limit.  Take effect into account by calculating nearest achievable speed. */
-			if (v_out[i] < motorVmin) {
-				double vsav = v_out[i];
-				v_out[i] =  (v_out[i] < motorVmin/2) ? 0. : motorVmin;
-				printf("v < vmin; %f corrected to %f\n", vsav, v_out[i]);
-			}
-		}
 		calcMotorTrajectory[i] = calcMotorTrajectory[i-1] + v_out[i-1]*dt + .5 * a_out[i-1]*dt*dt;
 	}
 	a_out[npoints-1] = a_out[npoints-2];
-
+	
 	if (pVar->debugLevel >= 7) {
 		printf("buildTrajectory:\n");
 		printf("%10s %10s %10s %10s %10s\n", "realTime", "motorTraj", "calcTraj", "v_out", "a_out");
@@ -1140,14 +1051,16 @@ static int buildTrajectory(SS_ID ssId, struct UserVar *pVar, double *realTimeTra
 	}
 	for (i=0; i<npoints; i++) {
 		if (i < npoints-1) {
-			thisTime = realTimeTrajectory[i+1];
+			time = realTimeTrajectory[i+1];
 			dt = realTimeTrajectory[i+1] - realTimeTrajectory[i];
+			/*position[i] = NINT(dir*calcMotorTrajectory[i+1]/motorResolution);*/
 			position[i] = userToRaw(calcMotorTrajectory[i+1], motorOffset, dir, motorResolution);
 			velocity[i] = NINT(dir*v_out[i+1]/motorResolution);
 			acceleration[i] = NINT(dir*a_out[i]/motorResolution);
 		} else {
-			thisTime = realTimeTrajectory[i];
+			time = realTimeTrajectory[i];
 			dt = realTimeTrajectory[i] - realTimeTrajectory[i-1];
+			/*position[i] = NINT(dir*calcMotorTrajectory[i]/motorResolution);*/
 			position[i] = userToRaw(calcMotorTrajectory[i], motorOffset, dir, motorResolution);
 			velocity[i] = 0;
 			acceleration[i] = NINT(dir*a_out[i]/motorResolution);
@@ -1157,16 +1070,7 @@ static int buildTrajectory(SS_ID ssId, struct UserVar *pVar, double *realTimeTra
 		} else {
 			x0 = .5 * acceleration[i]*dt*dt;
 		}
-		if (pVar->debugLevel >= 1) printf("%10.2f %10d %10d %10d %10d\n", thisTime, position[i], NINT(x0), velocity[i], acceleration[i]);
-	}
-
-	if (pVar->addAccelDecel) {
-		/* Shift motorTrajectory backward by one element, and clear decel element. */
-		npoints -= 2;
-		for (i=0; i<npoints; i++) {
-			motorTrajectory[i] = motorTrajectory[i+1];
-		}
-		motorTrajectory[npoints] = 0;
+		if (pVar->debugLevel >= 1) printf("%10.2f %10d %10d %10d %10d\n", time, position[i], NINT(x0), velocity[i], acceleration[i]);
 	}
 
 	return(0);
@@ -1181,9 +1085,10 @@ static double rawToUser(int raw, double off, int dir, double res) {
 	return (raw*res*dir+off);
 }
 
+
 /**************************************************************************************/
 static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
-	int i, j, k, n, currUpdateRate;
+	int i, j, k, n;
 	int onMask=0, offMask=0, outMask=0;
 	int segment_accel, segment_decel, segment_v_start, segment_v_end;
 	char absRel;
@@ -1194,22 +1099,8 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 	/* variables for splitting a segment */
 	int p1=0, v1=0, do_split;
 	double p1_double, t_v0;
-	int pulsesEnabled = 0;
-	int startPulses, endPulses, npoints;
-	
-	startPulses = pVar->startPulses;
-	endPulses = pVar->endPulses;
-	npoints = pVar->npoints;
 
-	if (pVar->addAccelDecel) {
-		/* We assume the arrays pVar->position, pVar->acceleration, pVar->velocity, and pVar->realTimeTrajectoryAccelDecel
-		* have had accel/decel trajectory points added. */
-		startPulses++;
-		endPulses++;
-		npoints+=2;
-	}
-
-	sprintf(stringOut, "AM;");	/* multitasking mode, flush queue */
+	sprintf(stringOut, "AM;");	/* multitasking mode */
 	writeOnly(ssId, pVar, stringOut);
 
 	/* digital I/O commands */
@@ -1223,7 +1114,6 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 		sprintf(stringOut, "BL%d;", pVar->outBitNum);	/* set output bit low */
 		writeOnly(ssId, pVar, stringOut);
 	}
-
 	if ((pVar->inBitNum >= 0) && (pVar->inBitNum <= 15)) {
 		sprintf(stringOut, "IO%d,0;", pVar->inBitNum);	/* set bit as input */
 		writeOnly(ssId, pVar, stringOut);
@@ -1246,33 +1136,27 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 	sprintf(stringOut, "AX; #UR?;");
 	writeRead(ssId, pVar, stringOut, stringOut);
 	if (pVar->debugLevel > 0) printf("Update rate ='%s'\n", stringOut);
-	currUpdateRate = atol(stringOut);
 
 	epicsTimeGetCurrent(&eStartTime); /* not actually the start time, getMotorPositions just needs a value */
 	getMotorPositions(ssId, pVar, pVar->motorCurrent, pVar->motorCurrentRaw, &(pVar->dtime));
 
-#if 0
-	/* It's a bad idea to change updateFreq at run time.  Better to set it at init time. */
 	/* Set update rate. */
 	i = 1024 * pVar->updateFreq;
-	if (i != currUpdateRate) {
-		sprintf(stringOut, "AX; #UR%d;", i);
-		writeOnly(ssId, pVar, stringOut);
+	sprintf(stringOut, "AX; #UR%d;", i);
+	writeOnly(ssId, pVar, stringOut);
 
-		/* reload motor positions to what they were before the #UR command */
-		/* Note that LP sets both motor and encoder positions to the same value */
-		n = sprintf(stringOut, "AM; LP");
-		for (j=0; j<MAX_AXES; j++) {
-			n += sprintf(&(stringOut[n]), "%d", pVar->motorCurrentRaw[j]);
-			if (j<(MAX_AXES-1)) n += sprintf(&(stringOut[n]), ",");
-		}
-		strcat(stringOut, ";");
-		writeOnly(ssId, pVar, stringOut);
+	/* reload motor positions to what they were before the #UR command */
+	/* Note that LP sets both motor and encoder positions to the same value */
+	n = sprintf(stringOut, "AM; LP");
+	for (j=0; j<MAX_AXES; j++) {
+		n += sprintf(&(stringOut[n]), "%d", pVar->motorCurrentRaw[j]);
+		if (j<(MAX_AXES-1)) n += sprintf(&(stringOut[n]), ",");
 	}
-#endif
+	strcat(stringOut, ";");
+	writeOnly(ssId, pVar, stringOut);
 
 	/* we may need current raw positions to mock up relative mode */
-	epicsTimeGetCurrent(&eStartTime); /* not actually the start time, getMotorPositions just needs eStartTime to have a value. */
+	epicsTimeGetCurrent(&eStartTime); /* not actually the start time, getMotorPositions just needs a value */
 	getMotorPositions(ssId, pVar, pVar->motorCurrent, pVar->motorCurrentRaw, &(pVar->dtime));
 
 	for (j=0, firstTask=1; j<MAX_AXES; j++) {
@@ -1287,12 +1171,10 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 				/* Tell controller to output a pulse at the beginning of every trajectory segment. */
 				sprintf(stringOut, "AM; VIO[%d]%04x,%04x,%04x;", j+1, onMask, offMask, outMask);
 				writeOnly(ssId, pVar, stringOut);
-				pulsesEnabled = 1;
 			} else {
 				/* Tell controller NOT to output a pulse at the beginning of every trajectory segment. */
 				sprintf(stringOut, "AM; VIO[%d]0,0,0;", j+1);
 				writeOnly(ssId, pVar, stringOut);
-				pulsesEnabled = 0;
 			}
 			/* done flag and interrupt */
 			sprintf(stringOut, "AM; VID[%d]1;", j+1);
@@ -1311,7 +1193,7 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 				writeOnly(ssId, pVar, stringOut);
 			}
 
-			for (i=0; i<npoints; i++) {
+			for (i=0; i<pVar->npoints; i++) {
 				if (pVar->acceleration[j][i] > 0) {
 					segment_accel = pVar->acceleration[j][i];
 					segment_decel = pVar->acceleration[j][i];
@@ -1335,7 +1217,7 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 					/* time from the beginning of the trajectory segment at which the velocity reaches zero.*/
 					t_v0 = (double)(-segment_v_start) / pVar->acceleration[j][i];
 
-					if ((t_v0 < .005) || (((pVar->realTimeTrajectoryAccelDecel[i] - pVar->realTimeTrajectoryAccelDecel[i-1]) - t_v0) < .005)) {
+					if ((t_v0 < .005) || (((pVar->realTimeTrajectory[i] - pVar->realTimeTrajectory[i-1]) - t_v0) < .005)) {
 						/* Don't split very near either end of segment. */
 						if (pVar->debugLevel > 0) printf("declined to split segment at t=%f\n", t_v0);
 						do_split = 0;
@@ -1364,11 +1246,8 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 				if (do_split) {
 					if (firstTask && ((pVar->outBitNum >= 0) && (pVar->outBitNum <= 15))) {
 						/* Disable output pulses */
-						if (pulsesEnabled) {
-							sprintf(stringOut, "AM; VIO[%d]0,0,0;", j+1);
-							writeOnly(ssId, pVar, stringOut);
-							pulsesEnabled = 0;
-						}
+						sprintf(stringOut, "AM; VIO[%d]0,0,0;", j+1);
+						writeOnly(ssId, pVar, stringOut);
 					}
 					/* we have to split this segment where velocity goes through zero. */
 					n = sprintf(stringOut, "AM; VA[%d]%d;", j+1, segment_accel);
@@ -1382,11 +1261,8 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 
 					if (firstTask && ((pVar->outBitNum >= 0) && (pVar->outBitNum <= 15))) {
 						/* Enable output pulses */
-						if (!pulsesEnabled) {
-							sprintf(stringOut, "AM; VIO[%d]%04x,%04x,%04x;", j+1, onMask, offMask, outMask);
-							writeOnly(ssId, pVar, stringOut);
-							pulsesEnabled = 1;
-						}
+						sprintf(stringOut, "AM; VIO[%d]%04x,%04x,%04x;", j+1, onMask, offMask, outMask);
+						writeOnly(ssId, pVar, stringOut);
 					}
 					n = sprintf(stringOut, "AM; VA[%d]%d;", j+1, segment_accel);
 					if (i < (pVar->npoints)-1) {
@@ -1401,25 +1277,6 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 					strcat(stringOut, ";");
 					writeOnly(ssId, pVar, stringOut);
 				} else {
-					/* enable pulses if we're within user specified range */
-					if (firstTask && ((pVar->outBitNum >= 0) && (pVar->outBitNum <= 15))) {
-						if (i >= startPulses && i <= endPulses) {
-							/* Enable output pulses */
-							if (!pulsesEnabled) {
-								sprintf(stringOut, "AM; VIO[%d]%04x,%04x,%04x;", j+1, onMask, offMask, outMask);
-								writeOnly(ssId, pVar, stringOut);
-								pulsesEnabled = 1;
-							}
-						} else {
-							if (pulsesEnabled) {
-								/* Disable output pulses */
-								sprintf(stringOut, "AM; VIO[%d]0,0,0;", j+1);
-								writeOnly(ssId, pVar, stringOut);
-								pulsesEnabled = 0;
-							}
-						}
-					}
-
 					n = sprintf(stringOut, "AM; VA[%d]%d;", j+1, segment_accel);
 					if (i < (pVar->npoints)-1) {
 						n += sprintf(&stringOut[n], "VV[%d]%d;", j+1, segment_v_end);
@@ -1442,8 +1299,60 @@ static int loadTrajectory(SS_ID ssId, struct UserVar *pVar, int simMode) {
 	return(0);
 }
 
+/**************************************************************************************/
+
+#if USE_SPLINE
+/* Numerical recipes spline routines */
+double u[MAX_ELEMENTS+1];
+
+static int spline(double *x, double *y, int n, double *y2)
+{
+	int i, k;
+	double p, qn, sig, un;
+
+	/* convert from c array to fortran array */
+	x--; y--; y2--;
+
+	y2[1] = u[1] = 0.0;
+	for (i=2; i<=n-1; i++) {
+		sig = (x[i]-x[i-1])/(x[i+1]-x[i-1]);
+		p = sig*y2[i-1]+2.0;
+		y2[i] = (sig-1.0)/p;
+		u[i] = (y[i+1]-y[i])/(x[i+1]-x[i]) - (y[i]-y[i-1])/(x[i]-x[i-1]);
+		u[i] = (6.0*u[i]/(x[i+1]-x[i-1])-sig*u[i-1])/p;
+	}
+	qn = un = 0.0;
+	y2[n] = (un-qn*u[n-1])/(qn*y2[n-1]+1.0);
+	for (k=n-1; k>=1; k--)
+		y2[k] = y2[k]*y2[k+1]+u[k];
+	return(0);
+}
+
+static int splint(double *xa, double *ya, int n, double x, double *y)
+{
+	int klo,khi,k;
+	double h,b,a;
+
+	/* convert from c array to fortran array */
+	xa--; ya--;
+
+	klo = 1;
+	khi = n;
+	while (khi-klo > 1) {
+		k = (khi+klo) >> 1;
+		if (xa[k] > x) khi = k;
+		else klo = k;
+	}
+	h = xa[khi]-xa[klo];
+	if (h == 0.0) {
+		printf("Bad XA input to routine SPLINT");
+		return(-1);
+	}
+	a = (xa[khi]-x)/h;
+	b = (x-xa[klo])/h;
+	*y = a*ya[klo]+b*ya[khi]+((a*a*a-a)*y2[klo]+(b*b*b-b)*y2[khi])*(h*h)/6.0;
+	return(0);
+}
+#endif
+
 }%
-
-
-
-

@@ -3,6 +3,10 @@ FILENAME...	drvMAXv.h
 USAGE...	OMS driver level "include" information that is specific to OMS
 		model MAXv.
 
+Version:        $Revision$
+Modified By:    $Author$
+Last Modified:  $Date$
+HeadURL:        $URL: https://subversion.xor.aps.anl.gov/synApps/motor/trunk/motorApp/OmsSrc/drvMAXv.h $
 */
 
 /*
@@ -43,7 +47,6 @@ USAGE...	OMS driver level "include" information that is specific to OMS
 #define INCdrvMAXvh 1
 
 #include "drvOmsCom.h"
-#include <epicsMutex.h>
 
 /*
  * MAXv default profile
@@ -61,8 +64,6 @@ enum MotorTypes {PSO,  // Stepper; w/o  encoder
 struct MAXvController
 {
     MotorTypes typeID[8];
-    float fwver;                /* firmware version */
-    epicsMutexId message_mutex;
 };
 
 
