@@ -42,8 +42,29 @@ VirtualAxis::VirtualAxis(SmartController *pC, int axisNo)
 #ifdef DEBUG
   printf("VirtualAxis::VirtualAxis(%p,%d)\n", pC, axisNo);
 #endif
+  asynStatus status = asynError;
   axisNo_ = axisNo;
   canAddr_ = axisNo + 1;
+
+  sprintf(pC_->outString_, "RSAMP");
+  status = pC_->writeReadController();
+  if (status) {
+    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR,
+              "%s: Axis %d sample rate not reported, default to 8000\n",
+              driverName, axisNo);
+    setIntegerParam(pC_->motorStatusProblem_, 1);
+  } else {
+    sampleRate_ = atof(pC_->inString_);
+  }
+/*  status = pC_->writeReadController(); */
+#ifdef DEBUG
+  printf("axisNO = %d  sampleRate= %f, command return = %s", axisNo,
+         sampleRate_, pC_->inString_);
+#endif
+  /* velocity units are 65536/sample rate */
+  velConst_ = 65536.0 / sampleRate_;
+  /* acclerations units are 65536/(sample*sample)  */
+  aclConst_ = 65536.0 / (sampleRate_ * sampleRate_);
 }
 
 /**VirtualAxis::processDeferredMoves()
