@@ -55,7 +55,7 @@ class SmartController : public asynMotorController {
   asynStatus writeFloat64(asynUser *pasynUser, epicsFloat64 value);
   asynStatus writeReadController();
   asynStatus writeController();
-  asynStatus setControllerMemory(char *location, epicsInt32 value);
+  asynStatus setControllerMemory(const char *location, epicsInt32 value);
   asynStatus setDeferredMoves(bool deferMoves, asynUser *pasynUser);
 
  protected:

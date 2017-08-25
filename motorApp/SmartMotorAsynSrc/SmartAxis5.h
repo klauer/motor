@@ -37,7 +37,6 @@ class SmartAxis5 : public SmartAxisBase {
   asynStatus setHighLimit(double highLimit);
   asynStatus setLowLimit(double lowLimit);
   asynStatus storePosition(double position);
-  asynStatus setControllerMemory(char *location, epicsInt32 value);
   asynStatus processDeferredMoves();
 
  protected:
