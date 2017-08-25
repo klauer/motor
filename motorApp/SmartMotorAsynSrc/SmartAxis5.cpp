@@ -66,20 +66,20 @@ SmartAxis5::SmartAxis5(SmartController *pC, int axisNo)
   pollPeriodDivisor_ = POLL_DIVISOR;
   pollCounter_ = 0;
   sprintf(pC_->outString_, SAMPLERATE, canAddr_);
-  status = pC->writeReadController();
+  status = pC_->writeReadController();
   if (status) {
     sampleRate_ = 8000.0;  // assume default sample rate
-    asynPrint(pC->pasynUserSelf, ASYN_TRACE_ERROR,
+    asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR,
               "%s: Axis %d sample rate not reported, default to 8000\n",
               driverName, axisNo);
-    setIntegerParam(pC->motorStatusProblem_, 1);
+    setIntegerParam(pC_->motorStatusProblem_, 1);
   } else {
-    sampleRate_ = atof(pC->inString_);
+    sampleRate_ = atof(pC_->inString_);
   }
-  status = pC->writeReadController();
+  status = pC_->writeReadController();
 #ifdef DEBUG
   printf("axisNO = %d  sampleRate= %f, command return = %s", axisNo,
-         sampleRate_, pC->inString_);
+         sampleRate_, pC_->inString_);
 #endif
   /* velocity units are 65536/sample rate */
   velConst_ = 65536.0 / sampleRate_;
@@ -87,8 +87,8 @@ SmartAxis5::SmartAxis5(SmartController *pC, int axisNo)
   aclConst_ = 65536.0 / (sampleRate_ * sampleRate_);
   setClosedLoop(true);
 
-  setIntegerParam(pC->motorStatusGainSupport_, 1);
-  setIntegerParam(pC->motorStatusHasEncoder_, 1);
+  setIntegerParam(pC_->motorStatusGainSupport_, 1);
+  setIntegerParam(pC_->motorStatusHasEncoder_, 1);
   setIntegerParam(pC_->motorStatusCommsError_, status ? 1 : 0);
   callParamCallbacks();
 }
@@ -408,16 +408,16 @@ asynStatus SmartAxis5::storePosition(double position) {
 #endif
   switch (canAddr_) {
     case 1:
-      status = setControllerMemory(POS_ST_LOC1, positionInt32);
+      status = pC_->setControllerMemory(POS_ST_LOC1, positionInt32);
       break;
     case 2:
-      status = setControllerMemory(POS_ST_LOC2, positionInt32);
+      status = pC_->setControllerMemory(POS_ST_LOC2, positionInt32);
       break;
     case 3:
-      status = setControllerMemory(POS_ST_LOC3, positionInt32);
+      status = pC_->setControllerMemory(POS_ST_LOC3, positionInt32);
       break;
     case 4:
-      status = setControllerMemory(POS_ST_LOC4, positionInt32);
+      status = pC_->setControllerMemory(POS_ST_LOC4, positionInt32);
       break;
     default:
       asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR,

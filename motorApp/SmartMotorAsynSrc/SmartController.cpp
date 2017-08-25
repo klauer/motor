@@ -314,10 +314,10 @@ asynStatus SmartController::writeReadController() {
   return status;
 }
 
-/** SmartController::setControllerMemory(char *location, epicsInt32 value)
+/** SmartController::setControllerMemory(const char *location, epicsInt32 value)
 *   Sets values to specific address in the master motor
 **/
-asynStatus SmartController::setControllerMemory(char *location, epicsInt32 value) {
+asynStatus SmartController::setControllerMemory(const char *location, epicsInt32 value) {
 // This will write all data to the master controller which is can addr 1
 #ifdef DEBUG
   printf("%s:1=%d\n", location, value);
