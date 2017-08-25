@@ -28,7 +28,7 @@
 #define REPORTVELOCITY         "RVA:%d"
 #define REPORTPOSITION         "RPA:%d"
 #define REPORTCMDEDPOS         "RPC:%d"
-#define REPORTTEMP             "RTEMP:%d"
+#define REPORTTEMP             "RTEMP"
 #define REPORTCURRENT          "RUIA:%d"
 #define REPORTEXTENC           "RCTR(1):%d"
 #define REPORTSTATUS0          "RW(0):%d"

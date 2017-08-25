@@ -555,7 +555,7 @@ asynStatus SmartAxis5::pollPosition() {
 asynStatus SmartAxis5::pollSmartParameters() {
   asynStatus status = asynSuccess;
 
-  sprintf(pC_->outString_, REPORTTEMP, canAddr_);  // Report temp
+  sprintf(pC_->outString_, REPORTTEMP);  // Report temp
   status = pC_->writeReadController();
   if (status) return status;
   temp_ = atof(pC_->inString_);
