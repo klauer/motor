@@ -125,9 +125,9 @@ void LinmotController::curveReadBack(LmPositionTimeCurve &curve) {
     setStringParam(profileName_, curve.name.c_str());
     setIntegerParam(profileCurveId_, curve.curve_id);
 
-    st = getDoubleParam(axis->axisNo_, profileMotorResolution_, &resolution);
-    st |= getDoubleParam(axis->axisNo_, profileMotorOffset_, &offset);
-    st |= getIntegerParam(axis->axisNo_, profileMotorDirection_, &direction);
+    st = getDoubleParam(axis->axisNo_, motorRecResolution_, &resolution);
+    st |= getDoubleParam(axis->axisNo_, motorRecOffset_, &offset);
+    st |= getIntegerParam(axis->axisNo_, motorRecDirection_, &direction);
 
     if (num_points > LM_MAX_PROFILE_POINTS)
         num_points = LM_MAX_PROFILE_POINTS;
