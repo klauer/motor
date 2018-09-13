@@ -541,7 +541,7 @@ asynStatus SmartAxis5::pollPosition() {
   setDoubleParam(pC_->smartCtr0_, enc0_);
 
   /* Read the absolute position
-    Commanded position is the controllers calculated position of the motor but 
+    Commanded position is the controllers calculated position of the motor but
     does not account for the pid servoing of the motor*/
   sprintf(pC_->outString_, REPORTCMDEDPOS,
           canAddr_);  // Report commanded position
@@ -597,11 +597,11 @@ asynStatus SmartAxis5::handleError(int error) {
   if (error & TEMP_MINOR) {
     asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR,
               "%s:%s: Minor temperature error\n", driverName, functionName);
-    pC_->setStringParam(axisNo_, pC_->smartError_, "Minor Temerature Error");
+    pC_->setStringParam(axisNo_, pC_->smartError_, "Minor Temperature Error");
   } else if (error & TEMP_MAJOR) {
     asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR,
               "%s:%s: Major temperature error\n", driverName, functionName);
-    pC_->setStringParam(axisNo_, pC_->smartError_, "Major temerature error");
+    pC_->setStringParam(axisNo_, pC_->smartError_, "Major temperature error");
   } else if (error & VOLT_ERROR) {
     asynPrint(pC_->pasynUserSelf, ASYN_TRACE_ERROR, "%s:%s: Voltage error\n",
               driverName, functionName);

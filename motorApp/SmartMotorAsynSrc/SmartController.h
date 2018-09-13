@@ -57,10 +57,12 @@ class SmartController : public asynMotorController {
   asynStatus writeController();
   asynStatus setControllerMemory(const char *location, epicsInt32 value);
   asynStatus setDeferredMoves(bool deferMoves, asynUser *pasynUser);
+  asynStatus syncCommunication();
 
  protected:
   bool deferMoves_;
   bool syncMode_;
+  bool commSync_;
   int numVirtualAxes_;
 #define FIRST_SMART_PARAM smartMotorTemp_
   int smartMotorTemp_;         /**< reported smart motor temp, deg C */

@@ -6,6 +6,7 @@ integrated motor/controllers.
 Mark Rivers
 March 4, 2011
 
+vi: ts=2 sw=2 sts=2
 */
 
 #include <stdio.h>
@@ -55,6 +56,8 @@ SmartController::SmartController(const char *portName,
   int fwMajor;
   char fw[20];
 
+  srand(time(0));
+
   createParam(smartTempString, asynParamFloat64, &smartMotorTemp_);
   createParam(smartTorqueString, asynParamFloat64, &smartMotorTorque_);
   createParam(smartErrorString, asynParamOctet, &smartError_);
@@ -92,6 +95,8 @@ SmartController::SmartController(const char *portName,
   if (numAxes_ < 1) {
     numAxes_ = 1;
   }
+  // Keep track of whether the communication is in sync
+  commSync_ = false;
   numVirtualAxes_ = numVirtualAxes;
   /*  Check FW Version "connect" to axis */
   status = getFW(fwMajor, fw);
@@ -299,17 +304,67 @@ asynStatus SmartController::writeController() {
   return status;
 }
 
+asynStatus SmartController::syncCommunication() {
+  static const char *functionName = "syncCommunication";
+  size_t nread;
+  asynStatus status;
+  char out_buffer[MAX_CONTROLLER_STRING_SIZE];
+  char in_buffer[MAX_CONTROLLER_STRING_SIZE];
+  char expected_response[MAX_CONTROLLER_STRING_SIZE];
+
+  if (commSync_)
+      return asynSuccess;
+
+  for (int attempt=0; attempt < 10; attempt++) {
+    // Flush any data coming in
+    pasynOctetSyncIO->flush(pasynUserController_);
+
+    in_buffer[0] = 0;
+    // Make a unique "synchronize comm" message
+    sprintf(expected_response, "SYNC%d-%d", attempt, rand() % 10000);
+    sprintf(out_buffer, "TALK PRINT(\"%s\",#13)", expected_response);
+    status = asynMotorController::writeReadController(
+            (const char*)out_buffer, (char*)in_buffer,
+            sizeof(in_buffer), &nread, DEFAULT_CONTROLLER_TIMEOUT);
+    if (status == asynSuccess) {
+      // Check that the message we were expecting is what we get back
+      if (!strncmp(expected_response, in_buffer, strlen(expected_response))) {
+        commSync_ = true;
+        asynPrint(this->pasynUserSelf, ASYN_TRACE_FLOW|ASYN_TRACE_ERROR,
+                  "%s:%s: Communication re-synchronized\n",
+                  driverName, functionName);
+        return asynSuccess;
+      }
+    }
+    asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR,
+              "%s:%s: Communication sync failure attempt #%d expected='%s' recv='%s'\n",
+              driverName, functionName, attempt, expected_response, in_buffer);
+    epicsThreadSleep(0.1);
+  }
+  return asynError;
+}
+
 asynStatus SmartController::writeReadController() {
   asynStatus status;
   static const char *functionName = "writeReadController";
 
-  /* Write outString_, get echo and resopnse */
-  /* response is expected to be (ECHO echoEos RESPONSE inputEos) */
+  if (!commSync_) {
+    status = syncCommunication();
+    if (status != asynSuccess) {
+      asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR,
+                "%s:%s: Communication error; synchronization failed "
+                "before sending '%s'\n",
+                driverName, functionName, outString_);
+      return status;
+    }
+  }
+
   status = asynMotorController::writeReadController();
   if (status != asynSuccess) {
+    commSync_ = false;
     asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR,
-              "%s:%s: Communication Error %d %s\n", driverName, functionName,
-              status, outString_);
+              "%s:%s: Communication Error %d when writing '%s'\n",
+              driverName, functionName, status, outString_);
   }
   return status;
 }
