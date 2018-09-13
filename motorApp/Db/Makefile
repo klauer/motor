@@ -47,6 +47,7 @@ DB += PI_Support.db PI_SupportCtrl.db
 DB += Phytron_motor.db Phytron_I1AM01.db Phytron_MCM01.db
 DB += asyn_auto_power.db
 DB += ScriptMotorReload.db
+DB += smart_extra.db
 
 #----------------------------------------------------
 # Declare template files which do not show up in DB
