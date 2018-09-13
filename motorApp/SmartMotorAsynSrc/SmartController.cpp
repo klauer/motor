@@ -42,8 +42,8 @@ SmartController::SmartController(const char *portName,
                                  int numVirtualAxes, double movingPollPeriod,
                                  double idlePollPeriod)
     : asynMotorController(portName, numAxes + numVirtualAxes + 1,
-                          NUM_SMART_PARAMS, asynUInt32DigitalMask,
-                          asynUInt32DigitalMask,
+                          NUM_SMART_PARAMS,
+                          0, 0,  // No additional mask needed
                           ASYN_CANBLOCK | ASYN_MULTIDEVICE,
                           1,     // autoconnect
                           0, 0)  // Default priority and stack size
