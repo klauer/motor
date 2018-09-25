@@ -26,6 +26,7 @@ class SmartAxisBase : public asynMotorAxis {
                           double acceleration, int forwards);
   virtual asynStatus stop(double acceleration);
   virtual asynStatus poll(bool *moving);
+  virtual asynStatus setCANAddress(int addr);
   virtual asynStatus setPosition(double position);
   virtual asynStatus setEncoderPosition(double position);
   virtual asynStatus setClosedLoop(bool closedLoop);

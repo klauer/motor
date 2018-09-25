@@ -162,3 +162,6 @@ asynStatus SmartAxisBase::resetFlags() {
   * \param[out] moving A flag that is set indicating that the axis is moving (1)
  * or done (0). */
 asynStatus SmartAxisBase::poll(bool *moving) { return asynSuccess; }
+
+
+asynStatus SmartAxisBase::setCANAddress(int canAddr) { return asynError; }

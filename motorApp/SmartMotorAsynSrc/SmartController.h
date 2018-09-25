@@ -50,6 +50,7 @@ class SmartController : public asynMotorController {
   SmartAxisBase *getAxis(asynUser *pasynUser);
   SmartAxisBase *getAxis(int axisNo);
   VirtualAxis *getVirtualAxis(asynUser *pasynUser);
+  asynStatus setCANAddress(int axisNo, int canAddr);
 
   asynStatus writeInt32(asynUser *pasynUser, epicsInt32 value);
   asynStatus writeFloat64(asynUser *pasynUser, epicsFloat64 value);

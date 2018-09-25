@@ -541,7 +541,7 @@ asynStatus SmartAxis5::pollPosition() {
   setDoubleParam(pC_->smartCtr0_, enc0_);
 
   /* Read the absolute position
-    Commanded position is the controllers calculated position of the motor but 
+    Commanded position is the controllers calculated position of the motor but
     does not account for the pid servoing of the motor*/
   sprintf(pC_->outString_, REPORTCMDEDPOS,
           canAddr_);  // Report commanded position
@@ -626,4 +626,13 @@ asynStatus SmartAxis5::handleError(int error) {
   }
 
   return status;
+}
+
+asynStatus SmartAxis5::setCANAddress(int canAddr) {
+  static const char *functionName = "setCANAddress";
+  canAddr_= canAddr;
+  asynPrint(pC_->pasynUserSelf, ASYN_TRACE_FLOW,
+            "%s:%s: CAN address for axis %d set to %d\n",
+            driverName, functionName, axisNo_, canAddr_);
+  return asynSuccess;
 }

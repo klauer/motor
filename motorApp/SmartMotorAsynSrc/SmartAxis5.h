@@ -38,6 +38,7 @@ class SmartAxis5 : public SmartAxisBase {
   asynStatus setLowLimit(double lowLimit);
   asynStatus storePosition(double position);
   asynStatus processDeferredMoves();
+  asynStatus setCANAddress(int canAddr);
 
  protected:
   int canAddr_;
