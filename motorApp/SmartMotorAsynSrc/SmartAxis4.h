@@ -30,7 +30,6 @@ public:
   virtual asynStatus setIGain(double iGain);
   virtual asynStatus setDGain(double dGain);
 
-
 protected:
   virtual asynStatus setAcceleration(double accleration);
   virtual asynStatus setVelocity(double minVelocity, double maxVelocity);

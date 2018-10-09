@@ -40,7 +40,7 @@ static const char *driverName = "SmartController";
 SmartController::SmartController(const char *portName,
                                  const char *SmartPortName, int numAxes,
                                  int numVirtualAxes, double movingPollPeriod,
-                                 double idlePollPeriod)
+                                 double idlePollPeriod, int default_class)
     : asynMotorController(portName, numAxes + numVirtualAxes + 1,
                           NUM_SMART_PARAMS, asynUInt32DigitalMask,
                           asynUInt32DigitalMask,
@@ -95,14 +95,21 @@ SmartController::SmartController(const char *portName,
   numVirtualAxes_ = numVirtualAxes;
   /*  Check FW Version "connect" to axis */
   status = getFW(fwMajor, fw);
+  if (default_class != 4 && default_class != 5) {
+    // For backward-compatibility, assume the default motors are class 5
+    // if this is unspecified.
+    default_class = 5;
+  }
+
   for (axis = 0; axis < numAxes; axis++) {
     if (status) {
       asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR,
                 "%s:%s cannot connect to axis %d\n", driverName, functionName,
                 axis);
+      fwMajor = default_class;
       asynPrint(this->pasynUserSelf, ASYN_TRACE_ERROR,
-                "%s:%s Default to class 5 on axis %d\n", driverName,
-                functionName, axis);
+                "%s:%s Default to class %d on axis %d\n", driverName,
+                functionName, axis, default_class);
     }
     if (fwMajor == 4) {
       asynPrint(this->pasynUserSelf, ASYN_TRACE_FLOW,
@@ -181,15 +188,17 @@ asynStatus SmartController::createVirtualAxes(SmartController *pC, int numAxes,
  * moving
   * \param[in] idlePollPeriod    The time in ms between polls when no axis is
  * moving
+  * \param[in] default_class     Default class of the motors
   */
 extern "C" int SmartCreateController(const char *portName,
                                      const char *SmartPortName, int numAxes,
                                      int numVirtualAxes,
                                      double movingPollPeriod,
-                                     double idlePollPeriod) {
+                                     double idlePollPeriod, int default_class) {
   SmartController *pSmartController =
       new SmartController(portName, SmartPortName, numAxes, numVirtualAxes,
-                          movingPollPeriod / 1000., idlePollPeriod / 1000.);
+                          movingPollPeriod / 1000., idlePollPeriod / 1000.,
+                          default_class);
   pSmartController = NULL;
   return (asynSuccess);
 }
@@ -404,15 +413,18 @@ static const iocshArg SmartCreateControllerArg4 = {"Moving poll period (ms)",
                                                    iocshArgInt};
 static const iocshArg SmartCreateControllerArg5 = {"Idle poll period (ms)",
                                                    iocshArgInt};
+static const iocshArg SmartCreateControllerArg6 = {"Default class (4, 5)",
+                                                   iocshArgInt};
 static const iocshArg *const SmartCreateControllerArgs[] = {
     &SmartCreateControllerArg0, &SmartCreateControllerArg1,
     &SmartCreateControllerArg2, &SmartCreateControllerArg3,
-    &SmartCreateControllerArg4, &SmartCreateControllerArg5};
+    &SmartCreateControllerArg4, &SmartCreateControllerArg5,
+    &SmartCreateControllerArg6};
 static const iocshFuncDef SmartCreateControllerDef = {
-    "SmartCreateController", 6, SmartCreateControllerArgs};
+    "SmartCreateController", 7, SmartCreateControllerArgs};
 static void SmartCreateContollerCallFunc(const iocshArgBuf *args) {
   SmartCreateController(args[0].sval, args[1].sval, args[2].ival, args[3].ival,
-                        args[4].ival, args[5].ival);
+                        args[4].ival, args[5].ival, args[6].ival);
 }
 
 static const iocshArg SmartSetCANAddressArg0 = {"Smart port name", iocshArgString};
