@@ -43,7 +43,7 @@ const static char *const modulName = "EthercatMCAxis::";
  */
 EthercatMCAxis::EthercatMCAxis(EthercatMCController *pC, int axisNo,
                      int axisFlags, const char *axisOptionsStr)
-  : asynAxisAxis(pC, axisNo),
+  : asynMotorAxis(pC, axisNo),
     pC_(pC)
 {
   memset(&drvlocal, 0, sizeof(drvlocal));
@@ -373,7 +373,7 @@ asynStatus EthercatMCAxis::initialUpdate(void)
  * \param[in] fp The file pointer on which report information will be written
  * \param[in] level The level of report detail desired
  *
- * After printing device-specific information calls asynAxisAxis::report()
+ * After printing device-specific information calls asynMotorAxis::report()
  */
 void EthercatMCAxis::report(FILE *fp, int level)
 {
@@ -382,7 +382,7 @@ void EthercatMCAxis::report(FILE *fp, int level)
   }
 
   // Call the base class method
-  asynAxisAxis::report(fp, level);
+  asynMotorAxis::report(fp, level);
 }
 
 
@@ -1643,7 +1643,7 @@ asynStatus EthercatMCAxis::setIntegerParam(int function, int value)
   }
 
   //Call base class method
-  status = asynAxisAxis::setIntegerParam(function, value);
+  status = asynMotorAxis::setIntegerParam(function, value);
   return status;
 }
 
@@ -1787,7 +1787,7 @@ asynStatus EthercatMCAxis::setDoubleParam(int function, double value)
   }
 
   // Call the base class method
-  status = asynAxisAxis::setDoubleParam(function, value);
+  status = asynMotorAxis::setDoubleParam(function, value);
   return status;
 }
 
@@ -1859,6 +1859,6 @@ asynStatus EthercatMCAxis::setStringParamDbgStrToMcu(const char *value)
     return setStringParamDbgStrToMcu(value);
   } else {
     /* Call base class method */
-    return asynAxisAxis::setStringParam(function, value);
+    return asynMotorAxis::setStringParam(function, value);
   }
 }

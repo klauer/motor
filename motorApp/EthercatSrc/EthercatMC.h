@@ -2,8 +2,8 @@
 FILENAME...   EthercatMC.h
 */
 
-#include "asynAxisController.h"
-#include "asynAxisAxis.h"
+#include "asynMotorController.h"
+#include "asynMotorAxis.h"
 
 #define AMPLIFIER_ON_FLAG_CREATE_AXIS  (1)
 #define AMPLIFIER_ON_FLAG_WHEN_HOMING  (1<<1)
@@ -86,7 +86,7 @@ typedef struct {
   int motorDiffPostion;     /* Not in struct. Calculated in poll() */
 } st_axis_status_type;
 
-class epicsShareClass EthercatMCAxis : public asynAxisAxis
+class epicsShareClass EthercatMCAxis : public asynMotorAxis
 {
 public:
   /* These are the methods we override from the base class */
@@ -113,7 +113,7 @@ private:
     eeAxisErrorCmdError
 
   } eeAxisErrorType;
-  EthercatMCController *pC_;          /**< Pointer to the asynAxisController to which this axis belongs.
+  EthercatMCController *pC_;          /**< Pointer to the asynMotorController to which this axis belongs.
                                    *   Abbreviated because it is used very frequently */
   struct {
     st_axis_status_type old_st_axis_status;
@@ -233,7 +233,7 @@ private:
   friend class EthercatMCController;
 };
 
-class epicsShareClass EthercatMCController : public asynAxisController {
+class epicsShareClass EthercatMCController : public asynMotorController {
 public:
   EthercatMCController(const char *portName, const char *EthercatMCPortName, int numAxes, double movingPollPeriod, double idlePollPeriod);
 

@@ -27,7 +27,7 @@ EthercatMCSupport_SRCS += EthercatMCSupport_registerRecordDeviceDriver.cpp
 PROD_IOC = EthercatMC
 
 EthercatMC_DBD += base.dbd
-EthercatMC_DBD += axisSupport.dbd
+EthercatMC_DBD += motorSupport.dbd
 EthercatMC_DBD += asyn.dbd
 EthercatMC_DBD += drvAsynIPPort.dbd
 EthercatMC_DBD += devEthercatMC.dbd
@@ -37,7 +37,7 @@ EthercatMC_SRCS += EthercatMCMain.cpp
 EthercatMC_SRCS += EthercatMC_registerRecordDeviceDriver.cpp
 
 EthercatMC_LIBS += asyn
-EthercatMC_LIBS += axis
+EthercatMC_LIBS += asynMotor
 EthercatMC_LIBS += EthercatMCSupport
 EthercatMC_LIBS += $(EPICS_BASE_IOC_LIBS)
 
