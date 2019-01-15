@@ -108,6 +108,9 @@ PhytronSrc_DEPEND_DIRS = MotorSrc
 DIRS += AMCISrc
 AMCISrc_DEPEND_DIRS = MotorSrc
 
+DIRS += EthercatSrc
+EthercatSrc_DEPEND_DIRS = MotorSrc
+
 # The Script motor support requires the lua scripting module
 ifdef LUA
 DIRS += ScriptMotorSrc
