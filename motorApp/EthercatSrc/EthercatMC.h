@@ -39,6 +39,11 @@ FILENAME...   EthercatMC.h
 #define EthercatMCScalRDBD_Tim_RBString      "SCALRDBD-Tim-RB"
 #define EthercatMCScalRDBD_En_RBString       "SCALRDBD-En-RB"
 
+#define motorMessageIsFromDriverString  "MOTOR_MESSAGE_DRIVER"
+#define motorMessageTextString          "MOTOR_MESSAGE_TEXT"
+#define motorFlagsHomeOnLsString        "MOTOR_FLAGSS_HOME_ON_LS"
+#define motorFlagsStopOnProblemString   "MOTOR_FLAGS_STOP_ON_PROBLEM"
+#define motorFlagsShowNotHomedString    "MOTOR_FLAGS_SHOW_NOT_HOMED"
 
 #define EthercatMCMCUErrMsgString            "MCUErrMsg"
 #define EthercatMCDbgStrToMcuString          "StrToMCU"
@@ -285,10 +290,16 @@ public:
   int EthercatMCScalRDBD_En_RB_;
   int EthercatMCEn_;
   int EthercatMCErrId_;
+
+  int motorFlagsHomeOnLs_;
+  int motorFlagsStopOnProblem_;
+  int motorFlagsShowNotHomed_;
+  int motorMessageIsFromDriver_;
+  int motorMessageText_;
   /* Last parameter */
 
   #define FIRST_VIRTUAL_PARAM EthercatMCErr_
-  #define LAST_VIRTUAL_PARAM EthercatMCErrId_
+  #define LAST_VIRTUAL_PARAM motorMessageText_
   #define NUM_VIRTUAL_MOTOR_PARAMS ((int) (&LAST_VIRTUAL_PARAM - &FIRST_VIRTUAL_PARAM + 1))
 
   friend class EthercatMCAxis;

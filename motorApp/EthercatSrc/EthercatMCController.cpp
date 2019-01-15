@@ -75,6 +75,12 @@ EthercatMCController::EthercatMCController(const char *portName, const char *Mot
   createParam(EthercatMCScalRDBD_Tim_RBString,asynParamFloat64,    &EthercatMCScalRDBD_Tim_RB_);
   createParam(EthercatMCScalRDBD_En_RBString, asynParamInt32,      &EthercatMCScalRDBD_En_RB_);
 
+  // Parameters from asynAxisController:
+  createParam(motorFlagsHomeOnLsString,          asynParamInt32,      &motorFlagsHomeOnLs_);
+  createParam(motorFlagsStopOnProblemString,     asynParamInt32,      &motorFlagsStopOnProblem_);
+  createParam(motorFlagsShowNotHomedString,      asynParamInt32,      &motorFlagsShowNotHomed_);
+  createParam(motorMessageIsFromDriverString,    asynParamInt32,      &motorMessageIsFromDriver_);
+  createParam(motorMessageTextString,            asynParamOctet,      &motorMessageText_);
 
 #ifdef CREATE_MOTOR_REC_RESOLUTION
   /* Latest asynMotorController does this, but not the version in 6.81 (or 6.9x) */
