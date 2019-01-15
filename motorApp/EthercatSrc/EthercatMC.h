@@ -90,6 +90,7 @@ class epicsShareClass EthercatMCAxis : public asynMotorAxis
 {
 public:
   /* These are the methods we override from the base class */
+  void updateMsgTxtFromDriver(const char *value);
   EthercatMCAxis(class EthercatMCController *pC, int axisNo,
             int axisFlags, const char *axisOptionsStr);
   void report(FILE *fp, int level);

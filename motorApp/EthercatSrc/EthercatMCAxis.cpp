@@ -1862,3 +1862,14 @@ asynStatus EthercatMCAxis::setStringParamDbgStrToMcu(const char *value)
     return asynMotorAxis::setStringParam(function, value);
   }
 }
+
+
+void EthercatMCAxis::updateMsgTxtFromDriver(const char *value)
+{
+  if (value && value[0]) {
+    pC_->setIntegerParam(axisNo_,pC_->motorMessageIsFromDriver_, 1);
+    setStringParam(pC_->motorMessageText_,value);
+  } else {
+    pC_->setIntegerParam(axisNo_,pC_->motorMessageIsFromDriver_, 0);
+  }
+}
