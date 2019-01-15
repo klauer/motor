@@ -37,7 +37,7 @@ EthercatMC_SRCS += EthercatMCMain.cpp
 EthercatMC_SRCS += EthercatMC_registerRecordDeviceDriver.cpp
 
 EthercatMC_LIBS += asyn
-EthercatMC_LIBS += asynMotor
+EthercatMC_LIBS += motor
 EthercatMC_LIBS += EthercatMCSupport
 EthercatMC_LIBS += $(EPICS_BASE_IOC_LIBS)
 
